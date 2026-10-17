@@ -1,0 +1,22 @@
+{
+  "queries": [
+    "Hyderabad property fraud land documents Telangana",
+    "Hyderabad open plot cheating case Telangana",
+    "Telangana villa flat real estate fraud buyers",
+    "Hyderabad fake property registration land scam",
+    "Telangana property title dispute court"
+  ],
+  "googleNewsRssBase": "https://news.google.com/rss/search",
+  "language": "en-IN",
+  "region": "IN",
+  "maxCandidatesPerQuery": 12,
+  "maxCandidatesPerRun": 40,
+  "maxAgeDays": 30,
+  "minimumPublishersForCrossCheck": 2,
+  "minimumDraftScore": 55,
+  "sourcePolicy": {
+    "preferEstablishedPublishers": true,
+    "neverTreatAllegationsAsProvenFacts": true,
+    "requireHumanApproval": true
+  }
+}
