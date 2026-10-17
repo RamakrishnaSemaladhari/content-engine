@@ -1,0 +1,11 @@
+name = "fivecheckmate-content-engine"
+main = "src/index.js"
+compatibility_date = "2026-10-18"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "REPLACE_WITH_D1_DATABASE_NAME"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+
+[ai]
+binding = "AI"
