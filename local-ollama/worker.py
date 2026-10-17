@@ -3,6 +3,9 @@ import json
 import os
 import time
 import requests
+from dotenv import load_dotenv
+
+load_dotenv()
 
 API_BASE = os.environ.get("ENGINE_API_URL", "").rstrip("/")
 API_TOKEN = os.environ.get("ENGINE_API_TOKEN", "")
