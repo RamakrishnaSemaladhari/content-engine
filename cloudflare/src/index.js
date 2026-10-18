@@ -16,7 +16,7 @@ function xml(s) {
     .replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim();
 }
 function getTag(block, name) {
-  const re = new RegExp("<" + name + "(?:\s[^>]*)?>([\s\\S]*?)</" + name + ">", "i");
+  const re = new RegExp("<" + name + "(?:\\s[^>]*)?>([\\s\\S]*?)</" + name + ">", "i");
   const m = block.match(re);
   return m ? xml(m[1]) : "";
 }
