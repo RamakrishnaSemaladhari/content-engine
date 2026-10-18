@@ -38,3 +38,12 @@ This repository is deployed as a separate Cloudflare Worker (`fivecheckmate-cont
 ## Security
 
 Never put secrets in source files, commits, issue comments, workflow output, or screenshots. Use GitHub Actions Secrets and Cloudflare Worker secrets. Only non-sensitive source code and templates belong in this public repository.
+
+## FiveCheckMate Insights editorial website
+
+- Staging visitor blog and role-based editorial portal: https://fivecheckmate-blog-preview.kingramakrishna.workers.dev
+- Editorial API and D1 backend: https://fivecheckmate-insights.kingramakrishna.workers.dev
+- The staging portal proxies same-origin `/api/*` calls to the backend so session cookies remain host-scoped to the staging UI.
+- Initial setup uses the existing Cloudflare `BOOTSTRAP_TOKEN` and `SESSION_SECRET` secrets. Create the first administrator once, then add staff accounts with the least-privilege roles: `editor`, `reviewer`, or `publisher`.
+- Publishing remains a human-controlled action. Public visitor pages show only published articles; editorial users can create drafts, submit for review, approve/reject, publish/unpublish, manage staff (admin only), and review audit events.
+- Reproducible staging UI source is in `preview/worker.js`. The preview Worker is separate from the production website worker and custom domain.
