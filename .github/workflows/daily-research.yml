@@ -2,8 +2,6 @@ name: Daily Research Queue
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "17 2 * * *" # 07:47 IST daily
 
 permissions:
   contents: read
