@@ -23,16 +23,20 @@ function getTag(block, name) {
 function host(raw) {
   try { return new URL(raw).hostname.replace(/^www\./,"").toLowerCase(); } catch { return ""; }
 }
-function score(title, snippet, publisher, hostname) {
+function score(title, snippet, publisher, publisherUrl, resultUrl) {
   const text = (title + " " + snippet).toLowerCase();
+  const pub = String(publisher || "").toLowerCase();
+  const domain = host(publisherUrl || resultUrl);
   const legal = ["fraud","cheating","forgery","property","plot","villa","flat","registration","title","deed","court","police","real estate"];
   const local = ["hyderabad","telangana","rangareddy","medchal","sangareddy","ghmc","hmda","malkajgiri","kollur"];
-  const detail = ["arrest","court","police","documents","buyers","victims","investigation","judgment","order"];
-  const trusted = ["thehindu.com","indianexpress.com","timesofindia.indiatimes.com","deccanchronicle.com","telanganatoday.com","newindianexpress.com","hindustantimes.com","ndtv.com","aninews.in","siasat.com","newsminute.com","eenadu.net","sakshi.com","barandbench.com","livelaw.in"];
-  const reliability = trusted.some(x => (hostname + " " + publisher.toLowerCase()).includes(x)) ? 90 : ((hostname.endsWith(".gov.in") || hostname.endsWith(".nic.in")) ? 100 : 55);
+  const detail = ["arrest","court","police","documents","buyers","victims","investigation","judgment","order","sub-registrar","fir"];
+  const trustedDomains = ["thehindu.com","indianexpress.com","timesofindia.indiatimes.com","deccanchronicle.com","telanganatoday.com","newindianexpress.com","hindustantimes.com","ndtv.com","aninews.in","siasat.com","newsminute.com","eenadu.net","sakshi.com","barandbench.com","livelaw.in","thewire.in","indiatoday.in","deccanherald.com"];
+  const trustedNames = ["the hindu","indian express","times of india","deccan chronicle","telangana today","new indian express","hindustan times","ndtv","ani","siasat","the news minute","eenadu","sakshi","bar and bench","livelaw","india today","deccan herald"];
+  const official = domain.endsWith(".gov.in") || domain.endsWith(".nic.in");
+  const reliability = official ? 98 : (trustedDomains.some(x => domain === x || domain.endsWith("." + x)) || trustedNames.some(x => pub.includes(x)) ? 88 : 50);
   const relevance = Math.min(100, 15 + legal.filter(x => text.includes(x)).length * 9 + local.filter(x => text.includes(x)).length * 12);
   const informativeness = Math.min(100, 30 + detail.filter(x => text.includes(x)).length * 10);
-  return {reliability, relevance, informativeness, total: Math.round(reliability*0.4 + relevance*0.35 + informativeness*0.25)};
+  return {reliability, relevance, informativeness, total: Math.round(reliability*0.4 + relevance*0.35 + informativeness*0.25), domain, official};
 }
 async function checkpoint(db, id, stage, payload) {
   await db.prepare("INSERT INTO checkpoints(job_id,stage,payload_json) VALUES(?,?,?) ON CONFLICT(job_id,stage) DO UPDATE SET payload_json=excluded.payload_json,created_at=CURRENT_TIMESTAMP").bind(id,stage,JSON.stringify(payload)).run();
@@ -59,14 +63,15 @@ async function getCandidates(max) {
     for (const match of items) {
       const block = match[1], title = getTag(block,"title"), link = getTag(block,"link");
       if (!title || !/^https?:\/\//i.test(link)) continue;
+      const sourceTag = (block.match(/<source(?:\\s[^>]*)?>([\\s\\S]*?)<\\/source>/i) || [])[0] || "";
       const publisher = getTag(block,"source") || "Unknown publisher";
-      const snippet = getTag(block,"description").slice(0,700);
+      const publisherUrl = ((sourceTag.match(/\\burl=["']([^"']+)["']/i) || [])[1] || "");
+      const snippet = getTag(block,"description").slice(0,500);
       const publishedAt = getTag(block,"pubDate");
       const canonical = link.split("#")[0];
       if (all.has(canonical)) continue;
-      const hostname = host(link);
-      const scores = score(title,snippet,publisher,hostname);
-      all.set(canonical,{url:link,canonicalUrl:canonical,title:title.slice(0,350),publisher,host:hostname,snippet,publishedAt,scores});
+      const scores = score(title,snippet,publisher,publisherUrl,link);
+      all.set(canonical,{url:link,canonicalUrl:canonical,title:title.slice(0,350),publisher,publisherUrl,publisherDomain:scores.domain,host:host(link),snippet,publishedAt,scores});
     }
   }
   return [...all.values()].sort((a,b)=>b.scores.total-a.scores.total).slice(0,max);
@@ -98,8 +103,12 @@ async function saveResult(db, jobId, result, sources, processor) {
 async function runDaily(req, env) {
   const db = env.DB, date = new Date().toISOString().slice(0,10), jobId = "fc-" + date.replace(/-/g,"");
   await db.prepare("INSERT INTO jobs(id,run_date,status,stage) VALUES(?,?,'DISCOVERING','source_discovery') ON CONFLICT(id) DO NOTHING").bind(jobId,date).run();
-  const existing = await db.prepare("SELECT status FROM jobs WHERE id=?").bind(jobId).first();
+  const existing = await db.prepare("SELECT status,stage,lease_until FROM jobs WHERE id=?").bind(jobId).first();
   if (["DRAFT_READY","NEEDS_REVIEW","APPROVED","PUBLISHED"].includes(existing.status)) return json({jobId,status:existing.status,resumed:true});
+  if (existing.status === "LOCAL_AI_PENDING") return json({jobId,status:"LOCAL_AI_PENDING",resumed:true,checkpointed:true});
+  if (existing.status === "DRAFT_PENDING" && existing.lease_until && new Date(existing.lease_until).getTime() > Date.now()) {
+    return json({jobId,status:"DRAFT_PENDING",resumed:true,inProgress:true},202);
+  }
   const body = await req.json().catch(()=>({}));
   const candidates = await getCandidates(Math.max(5,Math.min(40,Number(body.maxCandidates || 40))));
   for (const c of candidates) {
@@ -118,9 +127,9 @@ async function runDaily(req, env) {
     candidates:candidates.slice(0,12).map(c=>({title:c.title,url:c.url,publisher:c.publisher,host:c.host,publishedAt:c.publishedAt,snippet:c.snippet,scores:c.scores}))
   };
   await checkpoint(db,jobId,"ai_task",task);
-  await db.prepare("UPDATE jobs SET status='DRAFT_PENDING',stage='cloud_ai',updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(jobId).run();
+  await db.prepare("UPDATE jobs SET status='DRAFT_PENDING',stage='cloud_ai',lease_owner='cloudflare-ai',lease_until=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(new Date(Date.now()+300000).toISOString(),jobId).run();
   if (!env.AI || !env.AI.run) {
-    await db.prepare("UPDATE jobs SET status='LOCAL_AI_PENDING',stage='local_ollama',quota_state='UNAVAILABLE',updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(jobId).run();
+    await db.prepare("UPDATE jobs SET status='LOCAL_AI_PENDING',stage='local_ollama',quota_state='UNAVAILABLE',lease_owner=NULL,lease_until=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(jobId).run();
     await audit(db,jobId,"AI_HANDOFF","Workers AI unavailable; task saved for local Ollama");
     return json({jobId,status:"LOCAL_AI_PENDING",candidateCount:candidates.length});
   }
@@ -135,7 +144,7 @@ async function runDaily(req, env) {
   } catch (err) {
     const message = String(err && err.message || err).toLowerCase();
     const code = (message.includes("quota") || message.includes("limit") || message.includes("429") || message.includes("neuron")) ? "AI_QUOTA_OR_LIMIT" : (message.includes("timeout") ? "AI_TIMEOUT" : "AI_UNAVAILABLE");
-    await db.prepare("UPDATE jobs SET status='LOCAL_AI_PENDING',stage='local_ollama',quota_state=?,last_error_code=?,last_error_safe='Online AI unavailable; checkpoint saved',updated_at=CURRENT_TIMESTAMP WHERE id=?")
+    await db.prepare("UPDATE jobs SET status='LOCAL_AI_PENDING',stage='local_ollama',quota_state=?,last_error_code=?,last_error_safe='Online AI unavailable; checkpoint saved',lease_owner=NULL,lease_until=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?")
       .bind(code==="AI_QUOTA_OR_LIMIT"?"LIMITED":"UNAVAILABLE",code,jobId).run();
     await audit(db,jobId,"AI_HANDOFF",code);
     return json({jobId,status:"LOCAL_AI_PENDING",fallback:"ollama"});
@@ -174,8 +183,17 @@ async function completeLocal(req,env) {
 export default {
   async fetch(request,env) {
     const url=new URL(request.url);
-    if (request.method==="GET" && url.pathname==="/api/health") return json({ok:true,service:"content-engine",version:"0.1.0"});
+    if (request.method==="GET" && url.pathname==="/api/health") return json({ok:true,service:"content-engine",version:"0.1.1"});
     if (!auth(request,env)) return json({error:"UNAUTHORIZED"},401);
+    if (request.method==="GET" && url.pathname==="/api/drafts") {
+      const rows = await env.DB.prepare("SELECT id,job_id,title,slug,meta_description,status,verification_notes,created_at,updated_at FROM drafts ORDER BY created_at DESC LIMIT 50").all();
+      return json({drafts:rows.results || []});
+    }
+    if (request.method==="GET" && url.pathname.startsWith("/api/drafts/")) {
+      const id = decodeURIComponent(url.pathname.slice("/api/drafts/".length));
+      const draft = await env.DB.prepare("SELECT id,job_id,title,slug,meta_description,body_markdown,source_list_json,verification_notes,status,created_at,updated_at FROM drafts WHERE id=?").bind(id).first();
+      return draft ? json({draft}) : json({error:"DRAFT_NOT_FOUND"},404);
+    }
     if (request.method==="POST" && url.pathname==="/api/run/daily") return runDaily(request,env);
     if (request.method==="POST" && url.pathname==="/api/local/claim") return claimLocal(env);
     if (request.method==="POST" && url.pathname==="/api/local/complete") return completeLocal(request,env);
