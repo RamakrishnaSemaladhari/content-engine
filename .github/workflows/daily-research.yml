@@ -51,7 +51,10 @@ jobs:
             --data '{"mode":"daily","maxCandidates":40}' \
             "$ENGINE_API_URL/api/run/daily")"
           if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
-            echo "Worker returned HTTP $code. Checkpointed job state should remain in D1."
+            echo "::error::Worker returned HTTP $code."
+            echo "Worker response body (may contain diagnostic details):"
+            cat /tmp/response.json
             exit 1
           fi
-          echo "Daily job accepted. Response content was not logged."
+          echo "Daily job accepted. Response:"
+          cat /tmp/response.json
