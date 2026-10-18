@@ -21,14 +21,22 @@ jobs:
           ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
         run: |
           set -euo pipefail
-          if [ -z "$ENGINE_API_URL" ] || [ -z "$ENGINE_API_TOKEN" ]; then
-            echo "Worker URL/token secrets are not configured. No network request was made."
-            echo "Deploy and test the Worker first, then add repository secrets."
+          missing=0
+          if [ -z "${ENGINE_API_URL}" ]; then
+            echo "::error::ENGINE_API_URL is missing or unavailable to this workflow."
+            missing=1
+          fi
+          if [ -z "${ENGINE_API_TOKEN}" ]; then
+            echo "::error::ENGINE_API_TOKEN is missing or unavailable to this workflow."
+            missing=1
+          fi
+          if [ "$missing" -ne 0 ]; then
+            echo "Check Settings > Secrets and variables > Actions > Repository secrets. Names must match exactly. No network request was made."
             exit 1
           fi
           case "$ENGINE_API_URL" in
             https://*) ;;
-            *) echo "ENGINE_API_URL must use HTTPS"; exit 1 ;;
+            *) echo "::error::ENGINE_API_URL must use HTTPS"; exit 1 ;;
           esac
       - name: Create or resume daily job
         env:
