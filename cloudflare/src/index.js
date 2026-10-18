@@ -16,7 +16,7 @@ function xml(s) {
     .replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim();
 }
 function getTag(block, name) {
-  const re = new RegExp("<" + name + "(?:\\s[^>]*)?>([\\s\\S]*?)</" + name + ">", "i");
+  const re = new RegExp("<" + name + "(?:\s[^>]*)?>([\s\\S]*?)</" + name + ">", "i");
   const m = block.match(re);
   return m ? xml(m[1]) : "";
 }
@@ -63,9 +63,9 @@ async function getCandidates(max) {
     for (const match of items) {
       const block = match[1], title = getTag(block,"title"), link = getTag(block,"link");
       if (!title || !/^https?:\/\//i.test(link)) continue;
-      const sourceTag = (block.match(/<source(?:\\s[^>]*)?>([\\s\\S]*?)<\\/source>/i) || [])[0] || "";
+      const sourceTag = (block.match(/<source(?:\s[^>]*)?>([\s\\S]*?)<\/source>/i) || [])[0] || "";
       const publisher = getTag(block,"source") || "Unknown publisher";
-      const publisherUrl = ((sourceTag.match(/\\burl=["']([^"']+)["']/i) || [])[1] || "");
+      const publisherUrl = ((sourceTag.match(/\burl=["']([^"']+)["']/i) || [])[1] || "");
       const snippet = getTag(block,"description").slice(0,500);
       const publishedAt = getTag(block,"pubDate");
       const canonical = link.split("#")[0];
