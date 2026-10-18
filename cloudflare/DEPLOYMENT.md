@@ -1,6 +1,6 @@
 # Cloudflare deployment notes
 
-This Worker and D1 database have now been created in the connected Cloudflare account. The Worker is enabled on workers.dev and D1 schema creation has been confirmed. The live health endpoint still needs an external HTTP check, and the GitHub/local worker credentials must be configured before the pipeline can run.
+This Worker and D1 database have now been created in the connected Cloudflare account. The Worker is enabled on workers.dev and D1 schema creation has been confirmed. The live health endpoint still needs an external HTTP check. GitHub Actions secrets must be configured manually, and the local Ollama worker must be installed before end-to-end validation.
 
 ## 1. Create D1
 
@@ -37,7 +37,7 @@ The API token should be a long random value. Use the same value in GitHub Action
 
 - Worker health URL: https://fivecheckmate-content-engine.kingramakrishna.workers.dev/api/health
 - Worker base URL for GitHub Actions/local worker: https://fivecheckmate-content-engine.kingramakrishna.workers.dev
-- GitHub Actions secrets still need to be added manually because the connected GitHub tool does not expose Actions-secret creation:
+- GitHub Actions secrets still need to be added manually because the available GitHub integration does not expose Actions-secret creation:
   - ENGINE_API_URL = the Worker base URL above
   - ENGINE_API_TOKEN = the generated token supplied privately in the current chat
 - Local Ollama worker requires the same values in local-ollama/.env (copy .env.example first).
