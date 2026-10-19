@@ -1,7 +1,16 @@
 name: Daily Research Queue
+# Creates/resumes ONE unpublished draft job per day. It never approves or publishes anything.
 
 on:
   workflow_dispatch:
+    inputs:
+      diagnostics:
+        description: "Only run the feed diagnostics (no job is created)"
+        type: boolean
+        default: false
+  # Enable ONLY after a manual run succeeds end-to-end. 01:30 UTC = 07:00 IST.
+  # schedule:
+  #   - cron: "30 1 * * *"
 
 permissions:
   contents: read
@@ -13,48 +22,48 @@ concurrency:
 jobs:
   enqueue:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
+    env:
+      ENGINE_API_URL: ${{ secrets.ENGINE_API_URL }}
+      ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
+      DIAG_ONLY: ${{ inputs.diagnostics }}
     steps:
-      - name: Validate configuration
-        env:
-          ENGINE_API_URL: ${{ secrets.ENGINE_API_URL }}
-          ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
+      - name: Validate configuration (names only, values never printed)
         run: |
           set -euo pipefail
-          missing=0
-          if [ -z "${ENGINE_API_URL}" ]; then
-            echo "::error::ENGINE_API_URL is missing or unavailable to this workflow."
-            missing=1
-          fi
-          if [ -z "${ENGINE_API_TOKEN}" ]; then
-            echo "::error::ENGINE_API_TOKEN is missing or unavailable to this workflow."
-            missing=1
-          fi
-          if [ "$missing" -ne 0 ]; then
-            echo "Check Settings > Secrets and variables > Actions > Repository secrets. Names must match exactly. No network request was made."
-            exit 1
-          fi
-          case "$ENGINE_API_URL" in
-            https://*) ;;
-            *) echo "::error::ENGINE_API_URL must use HTTPS"; exit 1 ;;
-          esac
-      - name: Create or resume daily job
-        env:
-          ENGINE_API_URL: ${{ secrets.ENGINE_API_URL }}
-          ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
+          [ -n "${ENGINE_API_URL:-}" ]   || { echo "::error::Secret ENGINE_API_URL is missing."; exit 1; }
+          [ -n "${ENGINE_API_TOKEN:-}" ] || { echo "::error::Secret ENGINE_API_TOKEN is missing."; exit 1; }
+          case "$ENGINE_API_URL" in https://*) ;; *) echo "::error::ENGINE_API_URL must be https://"; exit 1;; esac
+          ENGINE_API_URL="${ENGINE_API_URL%/}"
+          echo "ENGINE_API_URL=$ENGINE_API_URL" >> "$GITHUB_ENV"
+      - name: Health check (public endpoint)
         run: |
-          set -euo pipefail
-          code="$(curl --silent --show-error --output /tmp/response.json --write-out '%{http_code}' \
-            --max-time 60 --request POST \
-            --header "Authorization: Bearer $ENGINE_API_TOKEN" \
-            --header "Content-Type: application/json" \
-            --data '{"mode":"daily","maxCandidates":40}' \
-            "$ENGINE_API_URL/api/run/daily")"
-          if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
-            echo "::error::Worker returned HTTP $code."
-            echo "Worker response body (may contain diagnostic details):"
-            cat /tmp/response.json
-            exit 1
-          fi
-          echo "Daily job accepted. Response:"
-          cat /tmp/response.json
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "$ENGINE_API_URL/api/health" || echo 000)
+          [ "$code" = 200 ] || { echo "::error::Worker health returned HTTP $code (Worker down or wrong URL)."; exit 1; }
+      - name: Call engine (bounded retries on 429/5xx only)
+        run: |
+          set -uo pipefail
+          if [ "${DIAG_ONLY:-false}" = "true" ]; then path=/api/diagnostics/rss; method=GET; else path=/api/run/daily; method=POST; fi
+          for attempt in 1 2 3; do
+            # token passed via a header file so it never appears in argv or logs
+            code=$(curl -sS -o resp.json -w '%{http_code}' --max-time 90 -X "$method" \
+              -H @<(printf 'Authorization: Bearer %s\n' "$ENGINE_API_TOKEN") \
+              -H 'Content-Type: application/json' --data '{"mode":"daily","maxCandidates":40}' \
+              "$ENGINE_API_URL$path" || echo 000)
+            case "$code" in
+              2*) break ;;
+              401) echo "::error::HTTP 401: ENGINE_API_TOKEN in GitHub does not match the Worker secret. Re-set BOTH to the same new value. Not retrying."; exit 1 ;;
+              403) echo "::error::HTTP 403: request blocked (Cloudflare rule/WAF?). Not retrying."; exit 1 ;;
+              404) echo "::error::HTTP 404: route missing - Worker not updated to this version. Not retrying."; exit 1 ;;
+              429|5*|000) echo "HTTP $code on attempt $attempt"; [ $attempt -lt 3 ] && sleep $((attempt*20)) ;;
+              *) echo "::error::Unexpected HTTP $code"; exit 1 ;;
+            esac
+          done
+          case "$code" in 2*) ;; *) echo "::error::Worker still failing (HTTP $code) after 3 attempts. Job state is kept in D1; see feed_diagnostics checkpoint."; \
+            jq -r '"status=\(.status // .error // "?") reason=\(.summary // "")"' resp.json 2>/dev/null || true; exit 1;; esac
+          # Safe summary only: status + counts, never bodies, headers or secrets.
+          jq -r 'if .feeds then "feeds ok: \(.summary.feedsOk)/\(.summary.feedsTotal), usable candidates: \(.summary.kept)" else "job=\(.jobId // "n/a") status=\(.status // "n/a") resumed=\(.resumed // false)" end' resp.json
+          st=$(jq -r '.status // ""' resp.json)
+          [ "$st" = "NO_USABLE_SOURCES" ] && echo "::notice::Feeds healthy but no recent relevant story met the threshold; no draft created today."
+          echo "Drafts stay UNPUBLISHED until a human approves."
+          exit 0

@@ -1,3 +1,5 @@
+import {CONFIG} from "./config.js";
+import {clean, host, canonicalize, buildFeedUrl, fetchFeed} from "./feeds.js";
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {status, headers: {"content-type":"application/json; charset=utf-8","cache-control":"no-store"}});
 }
@@ -8,20 +10,6 @@ function auth(req, env) {
   let diff = 0;
   for (let i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ actual.charCodeAt(i);
   return diff === 0;
-}
-function xml(s) {
-  return String(s || "").replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
-    .replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">")
-    .replace(/&quot;/g,'"').replace(/&#39;|&apos;/g,"'")
-    .replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim();
-}
-function getTag(block, name) {
-  const re = new RegExp("<" + name + "(?:\\s[^>]*)?>([\\s\\S]*?)</" + name + ">", "i");
-  const m = block.match(re);
-  return m ? xml(m[1]) : "";
-}
-function host(raw) {
-  try { return new URL(raw).hostname.replace(/^www\./,"").toLowerCase(); } catch { return ""; }
 }
 function score(title, snippet, publisher, publisherUrl, resultUrl) {
   const text = (title + " " + snippet).toLowerCase();
@@ -44,37 +32,25 @@ async function checkpoint(db, id, stage, payload) {
 async function audit(db, id, type, detail) {
   await db.prepare("INSERT INTO audit_events(job_id,event_type,detail_safe) VALUES(?,?,?)").bind(id,type,String(detail).slice(0,200)).run();
 }
-async function getCandidates(max) {
-  const queries = [
-    "Hyderabad property fraud land documents Telangana",
-    "Hyderabad open plot cheating case Telangana",
-    "Telangana villa flat real estate fraud buyers",
-    "Hyderabad fake property registration land scam",
-    "Telangana property title dispute court"
-  ];
-  const all = new Map();
-  for (const q of queries) {
-    const url = "https://news.google.com/rss/search?q=" + encodeURIComponent(q + " when:30d") + "&hl=en-IN&gl=IN&ceid=IN:en";
-    let res;
-    try { res = await fetch(url, {headers: {"user-agent":"FiveCheckMate-ResearchBot/1.0"}}); } catch { continue; }
-    if (!res.ok) continue;
-    const body = await res.text();
-    const items = [...body.matchAll(/<item(?:\s[^>]*)?>([\s\S]*?)<\/item>/gi)].slice(0,12);
-    for (const match of items) {
-      const block = match[1], title = getTag(block,"title"), link = getTag(block,"link");
-      if (!title || !/^https?:\/\//i.test(link)) continue;
-      const sourceTag = (block.match(/<source(?:\s[^>]*)?>([\s\S]*?)<\/source>/i) || [])[0] || "";
-      const publisher = getTag(block,"source") || "Unknown publisher";
-      const publisherUrl = ((sourceTag.match(/\burl=["']([^"']+)["']/i) || [])[1] || "");
-      const snippet = getTag(block,"description").slice(0,500);
-      const publishedAt = getTag(block,"pubDate");
-      const canonical = link.split("#")[0];
+async function getCandidates(max, cfg = CONFIG, fetchImpl = fetch) {
+  const all = new Map(), feeds = [], cutoff = Date.now() - cfg.maxAgeDays * 86400000;
+  const results = await Promise.all(cfg.queries.map(q => fetchFeed(buildFeedUrl(cfg, q), cfg, fetchImpl).then(r => ({q, ...r}))));
+  let tooOld = 0, lowScore = 0, invalid = 0;
+  for (const {q, items, diag} of results) {
+    feeds.push({query: q, ...diag});
+    for (const it of items.slice(0, cfg.maxCandidatesPerQuery)) {
+      const link = it.link, canonical = canonicalize(link);
+      if (!it.title || !canonical || !/^https?:/i.test(canonical)) { invalid++; continue; }
+      if (it.publishedAt && Date.parse(it.publishedAt) < cutoff) { tooOld++; continue; }
       if (all.has(canonical)) continue;
-      const scores = score(title,snippet,publisher,publisherUrl,link);
-      all.set(canonical,{url:link,canonicalUrl:canonical,title:title.slice(0,350),publisher,publisherUrl,publisherDomain:scores.domain,host:host(link),snippet,publishedAt,scores});
+      const publisher = it.publisher || "Unknown publisher";
+      const scores = score(it.title, it.snippet, publisher, it.publisherUrl, link);
+      if (scores.total < cfg.minimumDraftScore) { lowScore++; continue; }
+      all.set(canonical, {url: link, canonicalUrl: canonical, title: it.title.slice(0,350), publisher, publisherUrl: it.publisherUrl, publisherDomain: scores.domain, host: host(link), snippet: it.snippet, publishedAt: it.publishedAt, scores});
     }
   }
-  return [...all.values()].sort((a,b)=>b.scores.total-a.scores.total).slice(0,max);
+  const candidates = [...all.values()].sort((a,b)=>b.scores.total-a.scores.total).slice(0,max);
+  return {candidates, feeds, summary: {feedsOk: feeds.filter(f=>f.ok).length, feedsTotal: feeds.length, kept: candidates.length, tooOld, lowScore, invalid}};
 }
 function parseModel(raw) {
   const s = String(raw || "").trim().replace(/^\x60{3}(?:json)?\s*/i,"").replace(/\s*\x60{3}$/,"");
@@ -110,7 +86,9 @@ async function runDaily(req, env) {
     return json({jobId,status:"DRAFT_PENDING",resumed:true,inProgress:true},202);
   }
   const body = await req.json().catch(()=>({}));
-  const candidates = await getCandidates(Math.max(5,Math.min(40,Number(body.maxCandidates || 40))));
+  const found = await getCandidates(Math.max(5,Math.min(40,Number(body.maxCandidates || 40))));
+  const candidates = found.candidates;
+  await checkpoint(db,jobId,"feed_diagnostics",found);
   for (const c of candidates) {
     await db.prepare("INSERT INTO sources(job_id,url,canonical_url,publisher,title,published_at,snippet,reliability_score,relevance_score,informativeness_score,total_score) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(job_id,canonical_url) DO UPDATE SET total_score=excluded.total_score")
       .bind(jobId,c.url,c.canonicalUrl,c.publisher,c.title,c.publishedAt,c.snippet,c.scores.reliability,c.scores.relevance,c.scores.informativeness,c.scores.total).run();
@@ -118,8 +96,12 @@ async function runDaily(req, env) {
   await checkpoint(db,jobId,"sources_collected",candidates);
   await db.prepare("UPDATE jobs SET status='SOURCES_COLLECTED',stage='candidate_scoring',updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(jobId).run();
   if (!candidates.length) {
-    await db.prepare("UPDATE jobs SET status='FAILED',last_error_code='NO_SOURCES',last_error_safe='No usable RSS results',updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(jobId).run();
-    return json({jobId,status:"FAILED",reason:"NO_SOURCES"},503);
+    const fetchFailed = found.summary.feedsOk === 0;
+    const code = fetchFailed ? "SOURCE_FETCH_FAILED" : "NO_USABLE_SOURCES";
+    await db.prepare("UPDATE jobs SET status='FAILED',stage='source_discovery',last_error_code=?,last_error_safe=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(code,fetchFailed?"All feeds failed; see feed_diagnostics checkpoint":"Feeds worked but no recent relevant stories met the score threshold",jobId).run();
+    await audit(db,jobId,code,JSON.stringify(found.summary));
+    // 502 = upstream feeds unreachable (retry later); 200 = healthy run with nothing worth drafting.
+    return json({jobId,status:code,ok:false,summary:found.summary},fetchFailed?502:200);
   }
   const task = {
     taskType:"select_and_draft",jobId,
@@ -183,7 +165,7 @@ async function completeLocal(req,env) {
 export default {
   async fetch(request,env) {
     const url=new URL(request.url);
-    if (request.method==="GET" && url.pathname==="/api/health") return json({ok:true,service:"content-engine",version:"0.1.1"});
+    if (request.method==="GET" && url.pathname==="/api/health") return json({ok:true,service:"content-engine",version:"0.2.0"});
     if (!auth(request,env)) return json({error:"UNAUTHORIZED"},401);
     if (request.method==="GET" && url.pathname==="/api/drafts") {
       const rows = await env.DB.prepare("SELECT id,job_id,title,slug,meta_description,status,verification_notes,created_at,updated_at FROM drafts ORDER BY created_at DESC LIMIT 50").all();
@@ -194,9 +176,14 @@ export default {
       const draft = await env.DB.prepare("SELECT id,job_id,title,slug,meta_description,body_markdown,source_list_json,verification_notes,status,created_at,updated_at FROM drafts WHERE id=?").bind(id).first();
       return draft ? json({draft}) : json({error:"DRAFT_NOT_FOUND"},404);
     }
+    if (url.pathname==="/api/diagnostics/rss" && (request.method==="GET"||request.method==="POST")) {
+      const f = await getCandidates(40);
+      return json({summary:f.summary,feeds:f.feeds.map(x=>({query:x.query,ok:x.ok,status:x.status,items:x.items,bytes:x.bytes,attempts:x.attempts,error:x.error,ms:x.ms})),sample:f.candidates.slice(0,5).map(c=>({title:c.title,publisher:c.publisher,publishedAt:c.publishedAt,score:c.scores.total}))});
+    }
     if (request.method==="POST" && url.pathname==="/api/run/daily") return runDaily(request,env);
     if (request.method==="POST" && url.pathname==="/api/local/claim") return claimLocal(env);
     if (request.method==="POST" && url.pathname==="/api/local/complete") return completeLocal(request,env);
     return json({error:"NOT_FOUND"},404);
   }
 };
+export {getCandidates, score};
