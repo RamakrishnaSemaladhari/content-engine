@@ -32,7 +32,7 @@ Free-only research and article drafting for FiveCheckMate Insights. The architec
 
 ## Current implementation boundary
 
-The content-engine Worker supports discovery, checkpoints, runner task claiming/completion, and authenticated draft list/detail. The runner-local CPU model workflow is implemented on the freeze-github-runner-ai-workflow branch. The complete login-to-publication integration and live end-to-end run must be verified before release. The existing Insights portal/backend is separate from the content-engine D1; do not claim drafts are connected to public article delivery until that integration is tested.
+The content-engine Worker now runs discovery/checkpointing and runner task claiming/completion without Workers AI inference. A separate staging editorial API Worker (fivecheckmate-insights-staging-v2) is deployed with a CONTENT_DB binding, and the staging preview portal has an Import research drafts action. Imported articles remain editorial drafts and use the existing role-gated submit/approve/publish workflow. Live browser/API end-to-end acceptance is still pending; production website Worker and DNS were not changed.
 
 ## Manual setup
 
