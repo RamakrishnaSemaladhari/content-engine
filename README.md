@@ -1,49 +1,43 @@
-# Content Engine
+# FiveCheckMate Content Engine
 
-Quota-aware research and article-drafting pipeline for FiveCheckMate. This repository contains workflow code and templates only. Drafts, evidence notes, credentials and article content must not be committed here.
+Free-only research and article drafting for FiveCheckMate Insights. The architecture is frozen in docs/architecture-frozen.md.
 
-## Architecture
+## Frozen architecture
 
-1. GitHub Actions starts a manually triggered run (daily scheduling remains disabled until end-to-end validation).
-2. A Cloudflare Worker fetches public RSS/search feeds, deduplicates and scores candidates, and persists each stage in Cloudflare D1.
-3. Cloudflare Workers AI is attempted only while configured and available. If unavailable, quota-limited, or errored, the job is saved as LOCAL_AI_PENDING.
-4. The local Windows/Ubuntu worker polls the authenticated Worker API, processes pending tasks with Ollama, and submits results.
-5. Completed articles remain unpublished until a human approves them.
+1. GitHub Actions is the sole workflow trigger/orchestrator.
+2. The GitHub-hosted Ubuntu runner (4 vCPU / 16 GB class) runs a quantized Qwen 2.5 3B GGUF model locally on CPU through llama.cpp. No local Ollama, no paid AI API, and no Cloudflare Workers AI inference.
+3. The Cloudflare content-engine Worker + D1 persist research jobs, source metadata, task checkpoints, drafts, status and audit events.
+4. The existing Insights admin portal handles login, editing, preview, explicit publish/unpublish, and deletion of unpublished drafts. Published articles are served dynamically by the existing website; adding an article must not require redeploying the site.
+5. No article is published automatically. Source discovery metadata is not independent source verification; editor verification is required.
 
-GitHub Actions is an orchestrator, not an AI model. No paid AI API is configured.
+## Workflow
 
-## Current status
+- Run manually from GitHub Actions (workflow_dispatch); scheduled execution stays disabled until live end-to-end acceptance passes.
+- Worker searches Google News RSS, deduplicates candidates, scores metadata and persists source/task checkpoints.
+- Runner downloads a quantized open-weight model to the temporary runner, claims the checkpointed task, generates structured JSON and submits the result to the Worker.
+- Worker stores the result as an unpublished draft and confirms published: false.
+- The editor opens the authenticated admin portal, reviews evidence, edits and explicitly publishes. The public website reads only published articles.
+- Unpublished, unqualified drafts can be permanently deleted from the authenticated admin portal. Deletion is audited. Published articles must be unpublished before deletion.
 
-This repository is deployed as a separate Cloudflare Worker (`fivecheckmate-content-engine`) with a D1 database (`fivecheckmate-content-engine`). The Worker is not connected to or replacing the live FiveCheckMate website. Health and end-to-end HTTP behavior still require live validation; the daily schedule remains disabled.
+## Free-tier and security rules
 
-## Free-tier safeguards
+- No paid AI APIs or local Ollama.
+- The model is downloaded to the ephemeral GitHub runner; it is not stored on the user's computer or committed to Git.
+- Keep Actions logs free of tokens, full prompts, source text and article bodies.
+- Use repository Actions secrets ENGINE_API_URL and ENGINE_API_TOKEN.
+- Do not enable a schedule until the real workflow and publishing journey pass end-to-end tests.
+- Do not change the production website Worker or DNS during staging.
+- Never represent RSS headlines/snippets as verified facts. Legal allegations must be attributed, corroborated and reviewed before publication.
+- The public category wording is business compliance, not small-business compliance.
 
-- Never configure a paid model/provider as fallback.
-- Treat quota errors, timeouts and provider errors as a handoff to local Ollama.
-- Persist checkpoints before and after expensive stages; resume an existing LOCAL_AI_PENDING job instead of rediscovering sources.
-- Use idempotency keys and unique source URLs to avoid duplicate jobs.
-- Keep draft data and evidence notes in D1, not GitHub files or Actions logs.
-- Human approval is mandatory; this pipeline must not publish automatically.
-- Keep all work within free tiers; stop safely and checkpoint before exhausting quotas; use local Ollama rather than any paid API.
-- Runner minutes, Cloudflare quotas, feed terms and local hardware availability still apply.
+## Current implementation boundary
 
-## Setup outline
+The content-engine Worker supports discovery, checkpoints, runner task claiming/completion, and authenticated draft list/detail. The runner-local CPU model workflow is implemented on the freeze-github-runner-ai-workflow branch. The complete login-to-publication integration and live end-to-end run must be verified before release. The existing Insights portal/backend is separate from the content-engine D1; do not claim drafts are connected to public article delivery until that integration is tested.
 
-1. Cloudflare Worker and D1 have been created and the schema has been applied.
-2. Add GitHub Actions secrets ENGINE_API_URL and ENGINE_API_TOKEN.
-3. Configure local Ollama and test the Worker manually before enabling the schedule.
-5. On the local machine, install Python dependencies and Ollama. Copy local-ollama/.env.example to .env, set the Worker URL/token and model name, then run the worker.
-6. Test checkpointing, quota fallback and unpublished draft status before enabling daily automation.
+## Manual setup
 
-## Security
+Configure repository Actions secrets:
+- ENGINE_API_URL=https://fivecheckmate-content-engine.kingramakrishna.workers.dev
+- ENGINE_API_TOKEN: the current Worker token stored as a GitHub Actions secret.
 
-Never put secrets in source files, commits, issue comments, workflow output, or screenshots. Use GitHub Actions Secrets and Cloudflare Worker secrets. Only non-sensitive source code and templates belong in this public repository.
-
-## FiveCheckMate Insights editorial website
-
-- Staging visitor blog and role-based editorial portal: https://fivecheckmate-blog-preview.kingramakrishna.workers.dev
-- Editorial API and D1 backend: https://fivecheckmate-insights.kingramakrishna.workers.dev
-- The staging portal proxies same-origin `/api/*` calls to the backend so session cookies remain host-scoped to the staging UI.
-- Initial setup uses the existing Cloudflare `BOOTSTRAP_TOKEN` and `SESSION_SECRET` secrets. Create the first administrator once, then add staff accounts with the least-privilege roles: `editor`, `reviewer`, or `publisher`.
-- Publishing remains a human-controlled action. Public visitor pages show only published articles; editorial users can create drafts, submit for review, approve/reject, publish/unpublish, manage staff (admin only), and review audit events.
-- Reproducible staging UI source is in `preview/worker.js`. The preview Worker is separate from the production website worker and custom domain.
+Do not put the token in this repository, a commit, or Actions output.
