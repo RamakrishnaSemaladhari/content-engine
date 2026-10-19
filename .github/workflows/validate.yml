@@ -1,0 +1,26 @@
+name: Validate workflow source
+
+on:
+  push:
+    branches: [main, freeze-github-runner-ai-workflow]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Validate source syntax
+        run: |
+          node --check cloudflare/src/index.js
+          node --check insights-worker/src/index.js
+          node --check preview/worker.js
+          python -m py_compile scripts/generate_draft.py
