@@ -1,0 +1,11 @@
+name = "fivecheckmate-insights"
+main = "src/worker.js"
+compatibility_date = "2026-10-18"
+[assets]
+directory = "./public"
+binding = "ASSETS"
+[[d1_databases]]
+binding = "DB"
+database_name = "fivecheckmate-insights"
+database_id = "a10a355f-aef6-4dee-81a6-b7156925ad0c"
+migrations_dir = "migrations"

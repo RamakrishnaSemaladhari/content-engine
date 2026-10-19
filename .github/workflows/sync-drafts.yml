@@ -1,0 +1,33 @@
+name: Sync Drafts to Insights Review Queue
+# Copies engine drafts into the Insights admin as status "draft". Never approves or publishes.
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["Daily Research Queue"]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fivecheckmate-draft-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Sync (secret names only; values are never printed)
+        env:
+          ENGINE_API_URL: ${{ secrets.ENGINE_API_URL }}
+          ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
+          INSIGHTS_API_URL: ${{ secrets.INSIGHTS_API_URL }}
+          INSIGHTS_INGEST_TOKEN: ${{ secrets.INSIGHTS_INGEST_TOKEN }}
+        run: node scripts/sync-drafts.mjs
