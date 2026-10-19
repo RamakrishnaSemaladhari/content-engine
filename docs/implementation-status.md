@@ -19,7 +19,7 @@
 - [ ] Validate package wheel installation and actual model filename/download on GitHub-hosted runner.
 - [ ] Confirm repository secrets are configured and run a real Actions job.
 - [ ] Confirm resulting D1 rows, checkpoint, draft status and audit event.
-- [ ] Integrate content-engine drafts with the existing authenticated Insights admin/publishing backend.
+- [x] Add an authenticated Insights API import endpoint and admin UI control to copy a private content-engine draft into the editorial queue (source code only).\n- [ ] Apply the editorial D1 migration, configure CONTENT_DB binding and deploy the connector to staging.
 - [ ] Verify login, edit, preview, publish, unpublish, delete unpublished draft, role enforcement and audit history end-to-end.
 - [ ] Verify public article URL and sitemap update without deploying the website.
 - [ ] Verify unauthenticated users cannot read drafts or invoke publish/delete endpoints.
