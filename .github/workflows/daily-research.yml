@@ -1,60 +1,43 @@
-name: Daily Research Queue
+name: FiveCheckMate Research and Draft
 
 on:
   workflow_dispatch:
+  # Scheduling intentionally remains disabled until live end-to-end acceptance passes.
 
 permissions:
   contents: read
 
 concurrency:
-  group: fivecheckmate-daily-research
+  group: fivecheckmate-research-draft
   cancel-in-progress: false
 
 jobs:
-  enqueue:
+  research-and-draft:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 90
     steps:
-      - name: Validate configuration
+      - name: Check required secrets
         env:
           ENGINE_API_URL: ${{ secrets.ENGINE_API_URL }}
           ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
         run: |
           set -euo pipefail
-          missing=0
-          if [ -z "${ENGINE_API_URL}" ]; then
-            echo "::error::ENGINE_API_URL is missing or unavailable to this workflow."
-            missing=1
-          fi
-          if [ -z "${ENGINE_API_TOKEN}" ]; then
-            echo "::error::ENGINE_API_TOKEN is missing or unavailable to this workflow."
-            missing=1
-          fi
-          if [ "$missing" -ne 0 ]; then
-            echo "Check Settings > Secrets and variables > Actions > Repository secrets. Names must match exactly. No network request was made."
-            exit 1
-          fi
-          case "$ENGINE_API_URL" in
-            https://*) ;;
-            *) echo "::error::ENGINE_API_URL must use HTTPS"; exit 1 ;;
-          esac
-      - name: Create or resume daily job
+          test -n "$ENGINE_API_URL" || { echo "::error::Missing ENGINE_API_URL repository secret"; exit 1; }
+          test -n "$ENGINE_API_TOKEN" || { echo "::error::Missing ENGINE_API_TOKEN repository secret"; exit 1; }
+          case "$ENGINE_API_URL" in https://*) ;; *) echo "::error::ENGINE_API_URL must use HTTPS"; exit 1;; esac
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install CPU-only local inference runtime
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu "llama-cpp-python==0.3.16" "huggingface-hub==0.30.2"
+      - name: Run search, checkpoint, generate on runner, and save private draft
         env:
           ENGINE_API_URL: ${{ secrets.ENGINE_API_URL }}
           ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
-        run: |
-          set -euo pipefail
-          code="$(curl --silent --show-error --output /tmp/response.json --write-out '%{http_code}' \
-            --max-time 60 --request POST \
-            --header "Authorization: Bearer $ENGINE_API_TOKEN" \
-            --header "Content-Type: application/json" \
-            --data '{"mode":"daily","maxCandidates":40}' \
-            "$ENGINE_API_URL/api/run/daily")"
-          if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
-            echo "::error::Worker returned HTTP $code."
-            echo "Worker response body (may contain diagnostic details):"
-            cat /tmp/response.json
-            exit 1
-          fi
-          echo "Daily job accepted. Response:"
-          cat /tmp/response.json
+          HF_HUB_DISABLE_TELEMETRY: "1"
+          HF_HUB_ENABLE_HF_TRANSFER: "0"
+        run: python scripts/generate_draft.py
