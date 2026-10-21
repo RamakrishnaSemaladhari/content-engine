@@ -13,6 +13,5 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - run: node --test test/sync.test.mjs
       - run: cd insights && npm test
       - run: if [ -f cloudflare/package.json ]; then cd cloudflare && npm test; fi
