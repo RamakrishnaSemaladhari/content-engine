@@ -7,6 +7,9 @@
 - [x] Cloudflare Worker + D1 persist jobs, sources, checkpoints, drafts and audit events.
 - [x] Drafts remain private and unpublished by default.
 - [x] Automatic publishing and scheduled runs remain disabled until acceptance tests pass.
+- [x] Copilot CLI session has a 30-AI-credit soft cap; account-level paid overage must be disabled or hard-stopped before use.
+- [x] Actions job timeout is limited to 15 minutes per run.
+- [ ] Verify GitHub billing settings enforce a hard stop at zero paid overage; do not run online AI until confirmed.
 - [x] No production Worker or DNS changes in this change.
 
 ## Implemented in branch freeze-github-runner-ai-workflow
