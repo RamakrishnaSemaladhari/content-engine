@@ -15,6 +15,9 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -24,3 +27,5 @@ jobs:
           node --check insights-worker/src/index.js
           node --check preview/worker.js
           python -m py_compile scripts/generate_draft.py
+      - name: Run content-engine tests
+        run: cd cloudflare && npm test
