@@ -105,7 +105,7 @@ async function runDaily(req, env) {
   await db.prepare("INSERT INTO jobs(id,run_date,status,stage) VALUES(?,?,'DISCOVERING','source_discovery') ON CONFLICT(id) DO NOTHING").bind(jobId,date).run();
   const existing = await db.prepare("SELECT status,stage,lease_until FROM jobs WHERE id=?").bind(jobId).first();
   if (["DRAFT_READY","NEEDS_REVIEW","APPROVED","PUBLISHED"].includes(existing.status)) return json({jobId,status:existing.status,resumed:true});
-  if (existing.status === "LOCAL_AI_PENDING") return json({jobId,status:"LOCAL_AI_PENDING",resumed:true,checkpointed:true});
+  if (existing.status === "LOCAL_AI_PENDING" || existing.status === "RUNNER_AI_PENDING") return json({jobId,status:"RUNNER_AI_PENDING",resumed:true,checkpointed:true});
   if (existing.status === "DRAFT_PENDING" && existing.lease_until && new Date(existing.lease_until).getTime() > Date.now()) {
     return json({jobId,status:"DRAFT_PENDING",resumed:true,inProgress:true},202);
   }
@@ -127,15 +127,15 @@ async function runDaily(req, env) {
     candidates:candidates.slice(0,12).map(c=>({title:c.title,url:c.url,publisher:c.publisher,host:c.host,publishedAt:c.publishedAt,snippet:c.snippet,scores:c.scores}))
   };
   await checkpoint(db,jobId,"ai_task",task);
-  await db.prepare("UPDATE jobs SET status='LOCAL_AI_PENDING',stage='github_runner_ai',quota_state='NOT_USED',lease_owner=NULL,lease_until=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(jobId).run();
-  await audit(db,jobId,"AI_HANDOFF","Checkpoint ready for free CPU inference on GitHub-hosted runner");
-  return json({jobId,status:"LOCAL_AI_PENDING",candidateCount:candidates.length,processor:"github-hosted-cpu-model"});
+  await db.prepare("UPDATE jobs SET status='RUNNER_AI_PENDING',stage='github_runner_ai',quota_state='NOT_USED',lease_owner=NULL,lease_until=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(jobId).run();
+  await audit(db,jobId,"AI_HANDOFF","Checkpoint ready for online GitHub Copilot inference from Actions");
+  return json({jobId,status:"RUNNER_AI_PENDING",candidateCount:candidates.length,processor:"github-copilot-online"});
 }
-async function claimLocal(env) {
+async function claimRunner(env) {
   const db = env.DB, now = new Date(), until = new Date(now.getTime()+1800000).toISOString();
-  const row = await db.prepare("SELECT id FROM jobs WHERE status='LOCAL_AI_PENDING' OR (status='DRAFT_PENDING' AND lease_until IS NOT NULL AND lease_until<?) ORDER BY created_at LIMIT 1").bind(now.toISOString()).first();
+  const row = await db.prepare("SELECT id FROM jobs WHERE status IN ('LOCAL_AI_PENDING','RUNNER_AI_PENDING') OR (status='DRAFT_PENDING' AND lease_until IS NOT NULL AND lease_until<?) ORDER BY created_at LIMIT 1").bind(now.toISOString()).first();
   if (!row) return new Response(null,{status:204});
-  const updated = await db.prepare("UPDATE jobs SET status='DRAFT_PENDING',lease_owner='github-runner-ai',lease_until=?,attempt_count=attempt_count+1,updated_at=CURRENT_TIMESTAMP WHERE id=? AND (status='LOCAL_AI_PENDING' OR (status='DRAFT_PENDING' AND lease_until<?))").bind(until,row.id,now.toISOString()).run();
+  const updated = await db.prepare("UPDATE jobs SET status='DRAFT_PENDING',lease_owner='github-runner-ai',lease_until=?,attempt_count=attempt_count+1,updated_at=CURRENT_TIMESTAMP WHERE id=? AND (status IN ('LOCAL_AI_PENDING','RUNNER_AI_PENDING') OR (status='DRAFT_PENDING' AND lease_until<?))").bind(until,row.id,now.toISOString()).run();
   if (!updated.meta || !updated.meta.changes) return new Response(null,{status:204});
   const cp = await db.prepare("SELECT payload_json FROM checkpoints WHERE job_id=? AND stage='ai_task'").bind(row.id).first();
   if (!cp) {
@@ -144,21 +144,21 @@ async function claimLocal(env) {
   }
   return json({jobId:row.id,task:JSON.parse(cp.payload_json)});
 }
-async function completeLocal(req,env) {
+async function completeRunner(req,env) {
   const body = await req.json().catch(()=>null);
   if (!body || typeof body.jobId!=="string") return json({error:"INVALID_REQUEST"},400);
   const db=env.DB, job=await db.prepare("SELECT status,lease_owner FROM jobs WHERE id=?").bind(body.jobId).first();
   if (!job || job.status!=="DRAFT_PENDING" || job.lease_owner!=="github-runner-ai") return json({error:"JOB_NOT_CLAIMED"},409);
   if (body.errorCode) {
-    await db.prepare("UPDATE jobs SET status='LOCAL_AI_PENDING',stage='github_runner_ai',last_error_code='LOCAL_PROCESSING_FAILED',last_error_safe=?,lease_owner=NULL,lease_until=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(String(body.errorSafe||"Local processing failed").slice(0,80),body.jobId).run();
-    await audit(db,body.jobId,"LOCAL_RETRY","Local model task failed");
-    return json({status:"LOCAL_AI_PENDING"});
+    await db.prepare("UPDATE jobs SET status='RUNNER_AI_PENDING',stage='github_runner_ai',last_error_code='RUNNER_AI_FAILED',last_error_safe=?,lease_owner=NULL,lease_until=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(String(body.errorSafe||"GitHub online AI task failed").slice(0,80),body.jobId).run();
+    await audit(db,body.jobId,"RUNNER_RETRY","GitHub online AI task failed");
+    return json({status:"RUNNER_AI_PENDING"});
   }
   let result;
   try { result=parseModel(JSON.stringify(body.result||{})); } catch { return json({error:"INVALID_RESULT"},400); }
   const cp=await db.prepare("SELECT payload_json FROM checkpoints WHERE job_id=? AND stage='ai_task'").bind(body.jobId).first();
   const task=cp?JSON.parse(cp.payload_json):{candidates:[]};
-  await saveResult(db,body.jobId,result,task.candidates||[],"github-runner-cpu-model");
+  await saveResult(db,body.jobId,result,task.candidates||[],"github-copilot-online");
   return json({status:result.status,published:false});
 }
 export default {
@@ -176,8 +176,8 @@ export default {
       return draft ? json({draft}) : json({error:"DRAFT_NOT_FOUND"},404);
     }
     if (request.method==="POST" && url.pathname==="/api/run/daily") return runDaily(request,env);
-    if (request.method==="POST" && url.pathname==="/api/local/claim") return claimLocal(env);
-    if (request.method==="POST" && url.pathname==="/api/local/complete") return completeLocal(request,env);
+    if (request.method==="POST" &&  (url.pathname==="/api/runner/claim" || url.pathname==="/api/local/claim")) return claimRunner(env);
+    if (request.method==="POST" &&  (url.pathname==="/api/runner/complete" || url.pathname==="/api/local/complete")) return completeRunner(request,env);
     return json({error:"NOT_FOUND"},404);
   }
 };
