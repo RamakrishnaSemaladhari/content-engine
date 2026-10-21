@@ -14,37 +14,35 @@ concurrency:
 jobs:
   research-and-draft:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
-      - name: Check required secrets
+      - name: Check required secrets and free-tier gate
         env:
           ENGINE_API_URL: ${{ secrets.ENGINE_API_URL }}
           ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
-          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_PAT }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_FREE_TIER_CONFIRMED: ${{ vars.GEMINI_FREE_TIER_CONFIRMED }}
         run: |
           set -euo pipefail
           test -n "$ENGINE_API_URL" || { echo "::error::Missing ENGINE_API_URL repository secret"; exit 1; }
           test -n "$ENGINE_API_TOKEN" || { echo "::error::Missing ENGINE_API_TOKEN repository secret"; exit 1; }
-          test -n "$COPILOT_GITHUB_TOKEN" || { echo "::error::Missing COPILOT_PAT repository secret"; exit 1; }
+          test -n "$GEMINI_API_KEY" || { echo "::error::Missing GEMINI_API_KEY repository secret"; exit 1; }
+          test "$GEMINI_FREE_TIER_CONFIRMED" = "true" || { echo "::error::Blocked: set repository variable GEMINI_FREE_TIER_CONFIRMED=true only after confirming the Google AI Studio project has no linked billing account and remains on Free tier."; exit 1; }
           case "$ENGINE_API_URL" in https://*) ;; *) echo "::error::ENGINE_API_URL must use HTTPS"; exit 1;; esac
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
       - name: Validate JavaScript and Python syntax
         run: |
           node --check cloudflare/src/index.js
           node --check insights-worker/src/index.js
           node --check preview/worker.js
           python -m py_compile scripts/generate_draft.py
-      - name: Install GitHub Copilot CLI (online inference)
-        run: npm install --global @github/copilot
-      - name: Run research, ask online Copilot, and save an unpublished draft
+      - name: Run research, ask Gemini Free Tier, and save an unpublished draft
         env:
           ENGINE_API_URL: ${{ secrets.ENGINE_API_URL }}
           ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
-          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_PAT }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_FREE_TIER_CONFIRMED: ${{ vars.GEMINI_FREE_TIER_CONFIRMED }}
         run: python scripts/generate_draft.py
