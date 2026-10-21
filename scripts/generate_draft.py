@@ -1,33 +1,39 @@
 #!/usr/bin/env python3
-"""Generate an unpublished draft using online GitHub Copilot from a GitHub Actions runner."""
+"""Generate an unpublished draft using Google's Gemini API on the Free tier only."""
 import json
 import os
 import re
-import subprocess
 import sys
 import urllib.error
 import urllib.request
 
 API = os.environ["ENGINE_API_URL"].rstrip("/")
 TOKEN = os.environ["ENGINE_API_TOKEN"]
-COPILOT_TOKEN = os.environ["COPILOT_GITHUB_TOKEN"]
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+FREE_TIER_CONFIRMED = os.environ.get("GEMINI_FREE_TIER_CONFIRMED", "").lower() == "true"
+GEMINI_MODEL = "gemini-3.1-flash-lite"
+GEMINI_ENDPOINT = (
+    "https://generativelanguage.googleapis.com/v1beta/models/"
+    + GEMINI_MODEL + ":generateContent"
+)
 MAX_RESPONSE_BYTES = 2_000_000
+
 
 def api(path, method="GET", payload=None):
     data = None if payload is None else json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         API + path, data=data, method=method,
         headers={"Authorization": "Bearer " + TOKEN, "Content-Type": "application/json",
-                 "User-Agent": "FiveCheckMate-GitHubCopilot/1.0"})
+                 "User-Agent": "FiveCheckMate-Gemini-Free/1.0"})
     try:
-        with urllib.request.urlopen(req, timeout=120) as res:
+        with urllib.request.urlopen(req, timeout=60) as res:
             if res.status == 204:
                 return None
             raw = res.read(MAX_RESPONSE_BYTES)
             return json.loads(raw.decode("utf-8")) if raw else None
     except urllib.error.HTTPError as exc:
-        body = exc.read(1000).decode("utf-8", "replace")
-        raise RuntimeError(f"Engine API {path} returned HTTP {exc.code}: {body}") from exc
+        raise RuntimeError(f"Engine API {path} returned HTTP {exc.code}") from exc
+
 
 def parse_json(text):
     text = str(text or "").strip()
@@ -35,18 +41,75 @@ def parse_json(text):
     text = re.sub(r"\s*\x60{3}$", "", text)
     start, end = text.find("{"), text.rfind("}")
     if start < 0 or end <= start:
-        raise RuntimeError("Copilot response was not valid JSON")
+        raise RuntimeError("Gemini response was not valid JSON")
     result = json.loads(text[start:end + 1])
     if not isinstance(result, dict):
-        raise RuntimeError("Copilot response JSON was not an object")
+        raise RuntimeError("Gemini response JSON was not an object")
     return result
 
+
+def generate_with_gemini(prompt):
+    if not GEMINI_API_KEY:
+        raise RuntimeError("Missing GEMINI_API_KEY")
+    if not FREE_TIER_CONFIRMED:
+        raise RuntimeError("Gemini Free Tier gate is not confirmed; refusing AI request")
+
+    payload = {
+        "systemInstruction": {
+            "parts": [{"text": (
+                "Return one valid JSON object only. Follow the user's content instructions carefully."
+            )}]
+        },
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": 0.3,
+            "maxOutputTokens": 5000,
+            "responseMimeType": "application/json"
+        }
+    }
+    request = urllib.request.Request(
+        GEMINI_ENDPOINT,
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "x-goog-api-key": GEMINI_API_KEY,
+            "User-Agent": "FiveCheckMate-Gemini-Free/1.0"
+        }
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            data = json.loads(response.read(MAX_RESPONSE_BYTES).decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        # Do not print provider response bodies or credentials into Actions logs.
+        if exc.code in (401, 403):
+            reason = "Gemini key or Free-tier access was rejected"
+        elif exc.code == 429:
+            reason = "Gemini quota/rate limit reached; stopped without paid fallback"
+        else:
+            reason = f"Gemini request failed with HTTP {exc.code}"
+        raise RuntimeError(reason) from exc
+    except (TimeoutError, urllib.error.URLError) as exc:
+        raise RuntimeError("Gemini request failed or timed out; no provider fallback attempted") from exc
+
+    try:
+        parts = data["candidates"][0]["content"]["parts"]
+        output = "".join(part.get("text", "") for part in parts if isinstance(part, dict))
+    except (KeyError, IndexError, TypeError) as exc:
+        raise RuntimeError("Gemini returned no usable text candidate") from exc
+    return parse_json(output)
+
+
 def main():
-    if not COPILOT_TOKEN:
-        raise RuntimeError("Missing COPILOT_GITHUB_TOKEN Actions secret")
-    print("Starting online research and draft workflow.")
+    if not TOKEN:
+        raise RuntimeError("Missing ENGINE_API_TOKEN")
+    if not GEMINI_API_KEY or not FREE_TIER_CONFIRMED:
+        raise RuntimeError("Free-tier gate is not configured; refusing to start AI workflow")
+
+    print("Starting research and draft workflow using Gemini Free Tier.")
     run = api("/api/run/daily", "POST", {"mode": "daily", "maxCandidates": 40})
-    print("Research status:", json.dumps({k: (run or {}).get(k) for k in ("jobId", "status", "candidateCount")}))
+    print("Research status:", json.dumps({k: (run or {}).get(k) for k in
+                                          ("jobId", "status", "candidateCount")}))
     if (run or {}).get("status") in {"DRAFT_READY", "NEEDS_REVIEW", "APPROVED", "PUBLISHED"}:
         print("A draft already exists for this run; no overwrite performed.")
         return
@@ -79,25 +142,14 @@ def main():
         json.dumps(candidates[:10], ensure_ascii=False)
     )
     try:
-        proc = subprocess.run(
-            ["copilot", "-p", prompt, "-s", "--no-ask-user", "--max-ai-credits=30"],
-            check=False, capture_output=True, text=True, timeout=1500,
-            env={**os.environ, "COPILOT_GITHUB_TOKEN": COPILOT_TOKEN})
-        if proc.returncode:
-            # Do not print provider output, prompts, or credentials into Actions logs.
-            detail = (proc.stderr or proc.stdout or "Copilot CLI failed").strip().splitlines()
-            safe = "Copilot CLI exit " + str(proc.returncode) + (": " + detail[-1][:55] if detail else "")
-            api("/api/runner/complete", "POST", {"jobId": job_id, "errorCode": "COPILOT_FAILED",
-                 "errorSafe": safe[:80]})
-            raise RuntimeError("Online Copilot inference failed; checkpoint retained for retry.")
-        result = parse_json(proc.stdout)
+        result = generate_with_gemini(prompt)
     except Exception as exc:
-        if not isinstance(exc, RuntimeError) or "checkpoint retained" not in str(exc):
-            try:
-                api("/api/runner/complete", "POST", {"jobId": job_id, "errorCode": "COPILOT_FAILED",
-                     "errorSafe": (type(exc).__name__ + ": online inference failed")[:80]})
-            except Exception:
-                pass
+        try:
+            api("/api/runner/complete", "POST", {
+                "jobId": job_id, "errorCode": "GEMINI_FAILED",
+                "errorSafe": (type(exc).__name__ + ": Gemini Free Tier inference failed")[:80]})
+        except Exception:
+            pass
         raise
 
     result["status"] = "NEEDS_REVIEW" if result.get("status") == "NEEDS_REVIEW" else "DRAFT_READY"
@@ -131,10 +183,11 @@ def main():
     if (saved or {}).get("published") is not False:
         raise RuntimeError("Engine did not confirm that the article remains unpublished.")
 
+
 if __name__ == "__main__":
     try:
         main()
     except Exception as exc:
-        print(f"::error::Workflow failed safely: {type(exc).__name__}: online draft generation failed",
+        print(f"::error::Workflow failed safely: {type(exc).__name__}: online free-tier draft generation failed",
               file=sys.stderr)
         raise
