@@ -2,7 +2,7 @@ name: FiveCheckMate Research and Draft
 
 on:
   workflow_dispatch:
-  # Scheduling intentionally remains disabled until live end-to-end acceptance passes.
+  # Scheduling remains disabled until live end-to-end acceptance passes.
 
 permissions:
   contents: read
@@ -14,36 +14,38 @@ concurrency:
 jobs:
   research-and-draft:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 45
     steps:
       - name: Check required secrets
         env:
           ENGINE_API_URL: ${{ secrets.ENGINE_API_URL }}
           ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_PAT }}
         run: |
           set -euo pipefail
           test -n "$ENGINE_API_URL" || { echo "::error::Missing ENGINE_API_URL repository secret"; exit 1; }
           test -n "$ENGINE_API_TOKEN" || { echo "::error::Missing ENGINE_API_TOKEN repository secret"; exit 1; }
+          test -n "$COPILOT_GITHUB_TOKEN" || { echo "::error::Missing COPILOT_PAT repository secret"; exit 1; }
           case "$ENGINE_API_URL" in https://*) ;; *) echo "::error::ENGINE_API_URL must use HTTPS"; exit 1;; esac
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
       - name: Validate JavaScript and Python syntax
         run: |
           node --check cloudflare/src/index.js
           node --check insights-worker/src/index.js
           node --check preview/worker.js
           python -m py_compile scripts/generate_draft.py
-      - name: Install CPU-only local inference runtime
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu "llama-cpp-python==0.3.16" "huggingface-hub==0.30.2"
-      - name: Run search, checkpoint, generate on runner, and save private draft
+      - name: Install GitHub Copilot CLI (online inference)
+        run: npm install --global @github/copilot
+      - name: Run research, ask online Copilot, and save an unpublished draft
         env:
           ENGINE_API_URL: ${{ secrets.ENGINE_API_URL }}
           ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
-          HF_HUB_DISABLE_TELEMETRY: "1"
-          HF_HUB_ENABLE_HF_TRANSFER: "0"
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_PAT }}
+          COPILOT_MODEL: gpt-4.1
         run: python scripts/generate_draft.py
