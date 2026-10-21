@@ -1,65 +1,109 @@
-# Cloudflare deployment notes
+# Content Engine v0.3.0 — safe staging deployment
 
-This Worker and D1 database have now been created in the connected Cloudflare account. The Worker is enabled on workers.dev and D1 schema creation has been confirmed. The live health endpoint still needs an external HTTP check. GitHub Actions secrets must be configured manually, and the local Ollama worker must be installed before end-to-end validation.
+This document describes the **two-day editorial queue** in PR #1. The workflow uses the existing Cloudflare Workers AI binding only. It does not use local Ollama, Gemini, Copilot, a paid API, or a paid fallback.
 
-## 1. Create D1
+## Safety boundaries
 
-From a terminal with Wrangler installed and authenticated:
+- Do not change, deploy, or edit the production website Workers `fivecheckmate` or `5checkmate`, their routes, or production DNS.
+- Deploy only the `fivecheckmate-content-engine` Worker after reviewing and merging PR #1.
+- Keep the GitHub Actions workflow manual-only until the full staging cycle has passed. The schedule is intentionally commented out.
+- Shortlisting must not call AI. Drafting only processes stories explicitly marked SELECTED.
+- Every generated draft must remain `UNPUBLISHED`; publishing is a separate human action.
+- RSS headlines/snippets are discovery leads, not verified facts. Editors must open the original publisher report and verify claims before publication.
+- Do not put API tokens in source files, workflow inputs, logs, or chat. Rotate any token that may have been exposed.
 
-Already completed through the connected Cloudflare API: database `fivecheckmate-content-engine` created with ID `050c8bbf-172e-4369-8058-40d84052d2b2`; schema tables and indexes confirmed through `sqlite_master`. The `wrangler.toml.example` contains this D1 binding.
+## Existing engine resources
 
-## 2. Configure and deploy Worker
+- Worker: `fivecheckmate-content-engine`
+- Worker base URL: https://fivecheckmate-content-engine.kingramakrishna.workers.dev
+- Health endpoint: https://fivecheckmate-content-engine.kingramakrishna.workers.dev/api/health
+- D1 database: `fivecheckmate-content-engine`
+- D1 database ID: `050c8bbf-172e-4369-8058-40d84052d2b2`
+- Required existing bindings: D1 as `DB`, Workers AI as `AI`, Worker secret `ENGINE_API_TOKEN`
 
-From the cloudflare directory, with Wrangler installed:
+The health URL is documented here but must be checked live as part of the deployment; this document does not claim that a current HTTP check has passed.
 
-Already completed through the Cloudflare API: Worker `fivecheckmate-content-engine` deployed with D1 binding `DB`, Workers AI binding `AI`, and secret binding `ENGINE_API_TOKEN`. The workers.dev subdomain is enabled.
+## 1. Verify GitHub Actions configuration
 
-The API token should be a long random value. Use the same value in GitHub Actions Secrets and the local worker .env file. Never place it in a committed file.
+In the repository, open **Settings → Secrets and variables → Actions** and confirm these repository secrets exist:
 
-## 3. Test before automation
+- `ENGINE_API_URL`: `https://fivecheckmate-content-engine.kingramakrishna.workers.dev`
+- `ENGINE_API_TOKEN`: the same strong random token configured as the Worker secret `ENGINE_API_TOKEN`
 
-- GET /api/health should return only a minimal health response.
-- POST /api/run/daily with the bearer token should create/resume a D1 job.
-- When Workers AI is unavailable or quota-limited, the job should move to LOCAL_AI_PENDING.
-- The local worker should claim the checkpointed task and submit its result.
-- Confirm the draft status is UNPUBLISHED and no public article URL is exposed.
+Do not reveal or print the token. If the Worker secret and GitHub secret might differ, generate a new random token and update both sides securely. The GitHub integration used for this change cannot create or read Actions secrets, so their values are not verified by this document.
 
-## Current limitations to resolve before production
+## 2. Apply the additive D1 migration
 
-- This initial version discovers candidates through Google News RSS query feeds; it does not yet fetch and compare the full reporting from two independent publisher pages. Do not describe candidates as independently verified until that step is implemented.
-- The admin UI, draft review screen, approval/publishing endpoint and sitemap integration are not included yet.
-- The API routes are authenticated by a shared bearer secret. For production, add rate limits, request-size limits, stronger job-claim protections, and integrate the existing website's established admin authentication rather than exposing the shared token to browser code.
-- Confirm the selected Workers AI model is enabled for the account and measure actual Neuron usage before relying on the free allocation.
-- Run an end-to-end test with deliberately unavailable Workers AI before enabling daily scheduled automation.
+First confirm the Cloudflare account and database selected are the **engine** resources above. Do not apply this migration to any other database.
 
+From the `cloudflare` directory, after installing project dependencies and authenticating Wrangler:
 
-## Current endpoint and remaining manual setup
+```bash
+npx wrangler d1 execute fivecheckmate-content-engine --remote --file=migrations/0002_two_day_queue.sql
+```
 
-- Worker health URL: https://fivecheckmate-content-engine.kingramakrishna.workers.dev/api/health
-- Worker base URL for GitHub Actions/local worker: https://fivecheckmate-content-engine.kingramakrishna.workers.dev
-- GitHub Actions secrets still need to be added manually because the available GitHub integration does not expose Actions-secret creation:
-  - ENGINE_API_URL = the Worker base URL above
-  - ENGINE_API_TOKEN = the generated token supplied privately in the current chat
-- Local Ollama worker requires the same values in local-ollama/.env (copy .env.example first).
-- The workflow is manual-only until a complete end-to-end test passes. The schedule has intentionally been removed to avoid unattended failed runs.
-- Do not enable the schedule until the health endpoint, daily job creation, local claim/complete, and unpublished draft state have been tested.
+The migration creates the `candidates` table and its status/score index with `IF NOT EXISTS`. Verify the command succeeded before continuing. Do not run the new queue workflow against a database without this table.
 
-## v0.2.0 deploy and test order (secret names only)
-1. `cd cloudflare && npm test`  (8 tests must pass)
-2. Deploy the Worker (wrangler deploy, or upload src/ as modules). Do NOT touch Workers `fivecheckmate` or `5checkmate`.
-3. Generate a NEW random token. Put it only in: Worker secret `ENGINE_API_TOKEN` (`wrangler secret put ENGINE_API_TOKEN`) and GitHub Actions secret `ENGINE_API_TOKEN`. Set GitHub secret `ENGINE_API_URL` to the Worker base URL. Retire any token that was ever pasted in chat.
-4. Actions > Daily Research Queue > Run workflow with `diagnostics` ticked. Expect `feeds ok: N/5`.
-5. Run it again unticked. Expect a job, then a draft with status UNPUBLISHED in `GET /api/drafts`.
-6. Only after step 5 succeeds: uncomment the `schedule:` block in the workflow (07:00 IST). Scheduled runs only create unpublished drafts.
+## 3. Run tests and deploy the engine Worker
 
-## v0.3.0 two-day editorial queue (additive migration required)
-1. Apply once to the engine D1, by you, in the Cloudflare dashboard (D1 > Console) or: `npx wrangler d1 execute fivecheckmate-content-engine --remote --file=migrations/0002_two_day_queue.sql` (adds one table; touches nothing else).
-2. `npm test` (17 tests), deploy the Worker. No new secrets, no new AI provider (existing Workers AI binding only).
-3. GitHub > Actions > "Editorial Queue" > Run workflow:
-   - `diagnostics` (feeds ok?) -> `shortlist` (Day 1, NO AI; read the run summary) -> `select` with `ids` -> `draft` (Day 2; one article per request, max 3 per run).
-4. In Insights admin click "Import research drafts", then edit / submit / approve / publish by hand.
-5. After one full manual cycle works in staging, uncomment the two `schedule:` lines.
+From the repository's `cloudflare` directory:
 
-Rules enforced in code and tests: Day 1 never calls AI; Day 2 only touches SELECTED stories; quota exhaustion keeps the story queued and stops the run (no provider switch, no billing); other AI failures retry up to 3 times, then FAILED until you re-select; drafts are always UNPUBLISHED.
-Privacy: only the public headline/snippet/URL/publisher of the chosen story is sent to the AI.
-Not implemented: fetching the original publisher page to cross-check facts (Google News links are redirects); the draft notes tell the editor to verify against the original report.
+```bash
+npm ci
+npm test
+```
+
+The branch reports 17 tests, but rerun them on the reviewed commit and require a successful exit before deployment.
+
+After reviewing the diff and merging PR #1, deploy **only** the engine Worker using the project's reviewed Wrangler configuration:
+
+```bash
+npx wrangler deploy
+```
+
+Check that the configuration points to Worker `fivecheckmate-content-engine`, D1 binding `DB` points to the engine database, Workers AI binding `AI` is present, and no production website Worker or DNS resource is being changed. If the checked-in Wrangler config does not clearly target these resources, stop and resolve that before running deploy.
+
+## 4. Run the manual editorial workflow
+
+In GitHub, open **Actions → Editorial Queue** (workflow file: `.github/workflows/daily-research.yml`). Run the workflow manually in this order:
+
+1. `diagnostics` — confirm the feed diagnostics return a useful result.
+2. `shortlist` — Day 1; gathers RSS/Atom candidates, deduplicates and scores them. It must not call AI.
+3. `list` — review the candidates in the run summary.
+4. `select` or `reject` — supply the candidate IDs in the `ids` input, such as `3,7`.
+5. On the later drafting day, run `draft` — only selected candidates are eligible; maximum three one-article requests per workflow run.
+
+If there are no usable sources, inspect diagnostics instead of forcing a draft. If Workers AI quota is exhausted, the workflow must stop and leave selected work queued; do not switch providers or enable paid billing.
+
+## 5. Validate the full staging cycle
+
+Do not declare deployment successful until all of these are observed:
+
+- The health endpoint returns HTTP 200.
+- Diagnostics and shortlist finish and a candidate list appears in the GitHub Actions run summary.
+- Day 1 shortlist uses no AI.
+- Select/reject updates candidate status correctly.
+- Drafting processes only selected stories.
+- Quota exhaustion stops safely without switching provider or repeatedly consuming attempts.
+- A successful draft is saved with status `UNPUBLISHED`.
+- The draft can be imported into the Insights admin and edited/reviewed.
+- No draft becomes publicly visible until a person explicitly approves and publishes it.
+- No production website Worker or DNS changes occurred.
+
+The queue tests are mocked/unit tests; they do not replace these live checks. If any check fails, stop and fix it before scheduling.
+
+## 6. Scheduling
+
+**Do not uncomment the schedule yet.** Only consider enabling it after the complete manual staging cycle above passes and the run logs confirm the intended behavior. Any future schedule must preserve manual editorial approval and must never auto-publish.
+
+## Known limitation
+
+The workflow discovers candidate headlines/snippets and URLs; it does not independently cross-check facts against the full original publisher article. Editorial verification against the original report is required before publication.
+
+## Workflow behavior expected by design
+
+- Day 1: no AI calls.
+- Day 2: AI drafts selected stories only, one article per request, up to three requests per run.
+- Free Workers AI quota exhaustion: stop and keep work queued; no provider switching or paid fallback.
+- Other AI failures: retry behavior is bounded; inspect the recorded safe error before reselecting failed candidates.
+- Generated drafts: always `UNPUBLISHED`.
