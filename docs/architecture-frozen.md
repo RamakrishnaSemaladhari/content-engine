@@ -26,6 +26,8 @@ Status: Updated 2026-10-22 at the user's direction. AI inference is online throu
 
 ## AI and secrets
 
+**Strict free-only guardrail:** Each Copilot CLI invocation is capped at 30 AI credits as a per-session ceiling. This is a soft session limit, not a billing firewall. Before enabling the workflow, the account owner must disable paid Copilot usage/additional AI-credit purchases or set the GitHub billing budget to zero with **Stop usage when budget limit is reached** enabled. If that account-level hard stop cannot be confirmed, do not run the AI step. Never configure a payment method/budget to permit overage. Keep the workflow manual-only and stop when free allowance is exhausted.
+
 - No Ollama, llama.cpp, GGUF files, Hugging Face model downloads, or local inference.
 - Add repository Actions secret `COPILOT_PAT` containing a token permitted to use GitHub Copilot CLI. Do not paste it into code, issues, logs or chat.
 - Existing engine secrets remain `ENGINE_API_URL` and `ENGINE_API_TOKEN`.
