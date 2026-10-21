@@ -14,7 +14,7 @@ concurrency:
 jobs:
   research-and-draft:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 15
     steps:
       - name: Check required secrets
         env:
