@@ -10,6 +10,10 @@ Research and unpublished article drafting for FiveCheckMate Insights. GitHub Act
 4. The content engine stores the result as an unpublished draft.
 5. An editor imports the draft in the authenticated Insights portal, verifies sources, edits and uses the explicit editorial review/publish controls. Nothing is auto-published.
 
+## Free-only spending guardrail
+
+The Copilot CLI call includes `--max-ai-credits=30` to cap each session. GitHub documents this as a soft limit, so it is not sufficient by itself to guarantee zero charges. Before running the workflow, disable paid usage/additional AI-credit purchases or set a GitHub billing budget of $0 with **Stop usage when budget limit is reached** enabled. If that hard stop is not confirmed in account billing settings, do not run AI inference. The workflow remains manual-only and should stop when free Copilot credits are exhausted. GitHub Actions runtime is capped at 15 minutes per run; this does not by itself guarantee free Actions usage on a private repository.
+
 ## GitHub Actions secrets
 
 - `ENGINE_API_URL`: `https://fivecheckmate-content-engine.kingramakrishna.workers.dev`
