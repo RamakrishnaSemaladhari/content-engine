@@ -21,3 +21,5 @@
 No schema migration is needed: diagnostics are stored in the existing `checkpoints` table.
 
 | Engine AI error capture + bounded cloud retry | PASS | pipeline tests (mock AI) |
+| Two-day queue: Day 1 no-AI shortlist, human select/reject, Day 2 one-article drafts, quota stop, bounded retries | PASS (mock AI, in-memory D1) / NOT TESTED live | 17 tests; migration 0002 must be applied by the owner |
+| Original-page cross-check of facts | NOT DONE | editor must verify against the original report |

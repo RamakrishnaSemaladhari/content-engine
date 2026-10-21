@@ -51,3 +51,15 @@ The API token should be a long random value. Use the same value in GitHub Action
 4. Actions > Daily Research Queue > Run workflow with `diagnostics` ticked. Expect `feeds ok: N/5`.
 5. Run it again unticked. Expect a job, then a draft with status UNPUBLISHED in `GET /api/drafts`.
 6. Only after step 5 succeeds: uncomment the `schedule:` block in the workflow (07:00 IST). Scheduled runs only create unpublished drafts.
+
+## v0.3.0 two-day editorial queue (additive migration required)
+1. Apply once to the engine D1, by you, in the Cloudflare dashboard (D1 > Console) or: `npx wrangler d1 execute fivecheckmate-content-engine --remote --file=migrations/0002_two_day_queue.sql` (adds one table; touches nothing else).
+2. `npm test` (17 tests), deploy the Worker. No new secrets, no new AI provider (existing Workers AI binding only).
+3. GitHub > Actions > "Editorial Queue" > Run workflow:
+   - `diagnostics` (feeds ok?) -> `shortlist` (Day 1, NO AI; read the run summary) -> `select` with `ids` -> `draft` (Day 2; one article per request, max 3 per run).
+4. In Insights admin click "Import research drafts", then edit / submit / approve / publish by hand.
+5. After one full manual cycle works in staging, uncomment the two `schedule:` lines.
+
+Rules enforced in code and tests: Day 1 never calls AI; Day 2 only touches SELECTED stories; quota exhaustion keeps the story queued and stops the run (no provider switch, no billing); other AI failures retry up to 3 times, then FAILED until you re-select; drafts are always UNPUBLISHED.
+Privacy: only the public headline/snippet/URL/publisher of the chosen story is sent to the AI.
+Not implemented: fetching the original publisher page to cross-check facts (Google News links are redirects); the draft notes tell the editor to verify against the original report.
