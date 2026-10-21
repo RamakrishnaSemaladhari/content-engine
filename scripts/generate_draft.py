@@ -11,7 +11,6 @@ import urllib.request
 API = os.environ["ENGINE_API_URL"].rstrip("/")
 TOKEN = os.environ["ENGINE_API_TOKEN"]
 COPILOT_TOKEN = os.environ["COPILOT_GITHUB_TOKEN"]
-MODEL = os.environ.get("COPILOT_MODEL", "gpt-4.1")
 MAX_RESPONSE_BYTES = 2_000_000
 
 def api(path, method="GET", payload=None):
@@ -81,7 +80,7 @@ def main():
     )
     try:
         proc = subprocess.run(
-            ["copilot", "-p", prompt, "--model", MODEL, "-s", "--no-ask-user"],
+            ["copilot", "-p", prompt, "-s", "--no-ask-user"],
             check=False, capture_output=True, text=True, timeout=1500,
             env={**os.environ, "COPILOT_GITHUB_TOKEN": COPILOT_TOKEN})
         if proc.returncode:
