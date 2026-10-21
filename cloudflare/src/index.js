@@ -79,9 +79,20 @@ async function saveResult(db, jobId, result, sources, processor) {
 async function runDaily(req, env) {
   const db = env.DB, date = new Date().toISOString().slice(0,10), jobId = "fc-" + date.replace(/-/g,"");
   await db.prepare("INSERT INTO jobs(id,run_date,status,stage) VALUES(?,?,'DISCOVERING','source_discovery') ON CONFLICT(id) DO NOTHING").bind(jobId,date).run();
-  const existing = await db.prepare("SELECT status,stage,lease_until FROM jobs WHERE id=?").bind(jobId).first();
+  const existing = await db.prepare("SELECT status,stage,lease_until,last_error_code FROM jobs WHERE id=?").bind(jobId).first();
   if (["DRAFT_READY","NEEDS_REVIEW","APPROVED","PUBLISHED"].includes(existing.status)) return json({jobId,status:existing.status,resumed:true});
-  if (existing.status === "LOCAL_AI_PENDING") return json({jobId,status:"LOCAL_AI_PENDING",resumed:true,checkpointed:true});
+  if (existing.status === "LOCAL_AI_PENDING") {
+    // No local worker may be running: retry the free cloud model a bounded number of times before waiting for Ollama.
+    const tries = await db.prepare("SELECT COUNT(*) n FROM audit_events WHERE job_id=? AND event_type='CLOUD_AI_RETRY'").bind(jobId).first();
+    const cp = await db.prepare("SELECT payload_json FROM checkpoints WHERE job_id=? AND stage='ai_task'").bind(jobId).first();
+    if (env.AI && env.AI.run && cp && Number(tries.n) < 3) {
+      await audit(db,jobId,"CLOUD_AI_RETRY","retry "+(Number(tries.n)+1)+" of 3");
+      const task = JSON.parse(cp.payload_json);
+      await db.prepare("UPDATE jobs SET status='DRAFT_PENDING',stage='cloud_ai',lease_owner='cloudflare-ai',lease_until=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(new Date(Date.now()+300000).toISOString(),jobId).run();
+      return runCloudAi(env,jobId,task,task.candidates||[]);
+    }
+    return json({jobId,status:"LOCAL_AI_PENDING",resumed:true,checkpointed:true,lastError:existing.last_error_code||null});
+  }
   if (existing.status === "DRAFT_PENDING" && existing.lease_until && new Date(existing.lease_until).getTime() > Date.now()) {
     return json({jobId,status:"DRAFT_PENDING",resumed:true,inProgress:true},202);
   }
@@ -115,21 +126,34 @@ async function runDaily(req, env) {
     await audit(db,jobId,"AI_HANDOFF","Workers AI unavailable; task saved for local Ollama");
     return json({jobId,status:"LOCAL_AI_PENDING",candidateCount:candidates.length});
   }
+  return runCloudAi(env,jobId,task,task.candidates);
+}
+async function runCloudAi(env, jobId, task, candidates) {
+  const db = env.DB;
   try {
     const ai = await env.AI.run("@cf/meta/llama-3.1-8b-instruct",{messages:[
       {role:"system",content:"Return valid JSON only. Never fabricate sources or legal findings."},
-      {role:"user",content:task.instruction+"\nCANDIDATES JSON:\n"+JSON.stringify(task.candidates)}
+      {role:"user",content:task.instruction+"\nCANDIDATES JSON:\n"+JSON.stringify(task.candidates||candidates)}
     ],max_tokens:2400,temperature:0.2});
     const result = parseModel(ai.response || ai.output_text || "");
-    await saveResult(db,jobId,result,task.candidates,"cloudflare-workers-ai");
-    return json({jobId,status:result.status,candidateCount:candidates.length});
+    await saveResult(db,jobId,result,task.candidates||candidates,"cloudflare-workers-ai");
+    return json({jobId,status:result.status,candidateCount:(candidates||[]).length});
   } catch (err) {
-    const message = String(err && err.message || err).toLowerCase();
-    const code = (message.includes("quota") || message.includes("limit") || message.includes("429") || message.includes("neuron")) ? "AI_QUOTA_OR_LIMIT" : (message.includes("timeout") ? "AI_TIMEOUT" : "AI_UNAVAILABLE");
-    await db.prepare("UPDATE jobs SET status='LOCAL_AI_PENDING',stage='local_ollama',quota_state=?,last_error_code=?,last_error_safe='Online AI unavailable; checkpoint saved',lease_owner=NULL,lease_until=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?")
-      .bind(code==="AI_QUOTA_OR_LIMIT"?"LIMITED":"UNAVAILABLE",code,jobId).run();
-    await audit(db,jobId,"AI_HANDOFF",code);
-    return json({jobId,status:"LOCAL_AI_PENDING",fallback:"ollama"});
+    const raw = String(err && err.message || err);
+    const message = raw.toLowerCase();
+    const code = message.includes("invalid_model_json") || err instanceof SyntaxError ? "AI_BAD_OUTPUT"
+      : (message.includes("quota") || message.includes("limit") || message.includes("429") || message.includes("neuron")) ? "AI_QUOTA_OR_LIMIT"
+      : message.includes("timeout") ? "AI_TIMEOUT"
+      : (message.includes("not found") || message.includes("no such model") || message.includes("5007")) ? "AI_MODEL_NOT_FOUND"
+      : (message.includes("agree") || message.includes("license") || message.includes("5016")) ? "AI_MODEL_TERMS_NOT_ACCEPTED"
+      : (message.includes("auth") || message.includes("permission") || message.includes("10000")) ? "AI_NOT_AUTHORIZED"
+      : "AI_UNAVAILABLE";
+    // Safe detail: error class + first 140 chars of the provider message (no prompts, no secrets are ever in provider errors).
+    const safe = ((err && err.name) || "Error") + ": " + raw.replace(/\s+/g," ").slice(0,140);
+    await db.prepare("UPDATE jobs SET status='LOCAL_AI_PENDING',stage='local_ollama',quota_state=?,last_error_code=?,last_error_safe=?,lease_owner=NULL,lease_until=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?")
+      .bind(code==="AI_QUOTA_OR_LIMIT"?"LIMITED":"UNAVAILABLE",code,safe,jobId).run();
+    await audit(db,jobId,"AI_HANDOFF",code+" "+safe);
+    return json({jobId,status:"LOCAL_AI_PENDING",fallback:"ollama",aiErrorCode:code});
   }
 }
 async function claimLocal(env) {

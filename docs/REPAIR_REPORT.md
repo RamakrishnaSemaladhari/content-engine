@@ -9,7 +9,9 @@
 | Controlled outcomes: NO_USABLE_SOURCES (HTTP 200) vs SOURCE_FETCH_FAILED (502) | PASS | replaces blanket 503 |
 | GET/POST /api/diagnostics/rss (auth required, returns counts only) | PASS (mock) / NOT TESTED live | |
 | Workflow: 401/403/404 stop with clear message; 429/5xx retried 3x; token never logged | PASS vs mock server | |
-| Root cause of the earlier 503 | NOT VERIFIED | Old code returned 503 only when 0 candidates came back. Likely feeds blocked/empty from Cloudflare IPs, or Google returned HTML. Run diagnostics after deploy to see the exact per-feed reason. (The old getTag regex looked wrong but worked by accident.) |
+| Root cause of the earlier 503 | VERIFIED via D1 (read-only) | Source discovery now works: job fc-20261018 collected 37 sources. The 503/NO_SOURCES was the old regex bug (already fixed on main). |
+| Why no draft exists | VERIFIED (symptom) / cause NOT YET KNOWN | Job is LOCAL_AI_PENDING with AI_UNAVAILABLE: the Workers AI call threw, old code stored only a generic code, and no local Ollama worker is running. This PR now stores the real error text and retries cloud AI up to 3 times. |
+| (superseded) Root cause of the earlier 503 | Old code returned 503 only when 0 candidates came back. Likely feeds blocked/empty from Cloudflare IPs, or Google returned HTML. Run diagnostics after deploy to see the exact per-feed reason. (The old getTag regex looked wrong but worked by accident.) |
 | Earlier 401 | NOT VERIFIED | Means GitHub secret != Worker secret. Re-set both to the same new value. |
 | Live end-to-end (AI draft, D1 rows, local Ollama) | NOT TESTED | needs your Cloudflare/GitHub access |
 | Admin UI, approve/publish, sitemap, CMS adapter | BLOCKED | fivecheckmate.com is static HTML with no blog or sitemap.xml; blog platform must be decided first |
@@ -17,3 +19,5 @@
 | Independent two-publisher corroboration | NOT DONE | candidates are headlines, not verified facts |
 
 No schema migration is needed: diagnostics are stored in the existing `checkpoints` table.
+
+| Engine AI error capture + bounded cloud retry | PASS | pipeline tests (mock AI) |
