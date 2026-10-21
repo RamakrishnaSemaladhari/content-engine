@@ -32,6 +32,12 @@ Status: Updated 2026-10-22 at the user's direction. AI inference is online throu
 - The workflow fails clearly if the required token is missing. Copilot plan access, policy, and usage limits must be confirmed on the GitHub account. Do not configure paid overflow or automatic billing.
 - Let Copilot CLI use the account's default/auto model selection to avoid hard-coding a model that may not be enabled for the account.
 
+## Database compatibility and feed repair
+
+The current D1 `jobs.status` CHECK constraint includes the legacy value `LOCAL_AI_PENDING` but not `RUNNER_AI_PENDING`. To avoid a database migration, that value is kept internally as a compatibility state only; the API reports `RUNNER_AI_PENDING`, and the stage/audit records identify the online GitHub runner. No local inference runs.
+
+The branch also includes the tested RSS/Atom feed parser, URL canonicalisation, recency/relevance filters, bounded timeouts/retries and per-feed diagnostics from the feed-repair work.
+
 ## Retry and editorial controls
 
 The workflow uses persisted research checkpoints. If online inference fails, it returns the task to the pending runner state and logs a short safe diagnostic. A later manual run can retry; scheduled execution remains disabled until acceptance.
