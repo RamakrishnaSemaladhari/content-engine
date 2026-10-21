@@ -1,22 +1,22 @@
 # Frozen FiveCheckMate Insights Architecture
 
-Status: Frozen on 2026-10-19. Do not change components without explicit user instruction.
+Status: Updated 2026-10-22 at the user's direction. AI inference is online through GitHub Copilot CLI invoked by GitHub Actions. No local model or Ollama path is part of the workflow.
 
 ## Components
 
 - Trigger/orchestrator: GitHub Actions, manual dispatch while acceptance testing is underway.
-- AI drafting: local CPU inference on the GitHub-hosted runner, 4-vCPU / 16-GB class, using a quantized Qwen2.5-3B-Instruct GGUF model with llama.cpp. No local Ollama on the user's machine, no Workers AI inference, no paid AI APIs.
+- AI drafting: online GitHub Copilot via the Copilot CLI on a temporary GitHub-hosted runner. This requires a valid Copilot-enabled token supplied as repository secret `COPILOT_PAT`; it is not a guarantee of unlimited or free inference.
 - State/API: existing Cloudflare Worker fivecheckmate-content-engine and its D1 database.
 - Editorial control: existing FiveCheckMate Insights authenticated admin portal/backend.
 - Public delivery: existing website queries published article data dynamically. Publishing, editing or deleting an article must not require a website deployment.
-- Workflow: discovery → deduplicate/score → checkpoint task → runner-local generation → private draft → authenticated editor verification/edit → explicit publish → public URL and sitemap refresh.
+- Workflow: discovery → deduplicate/score → checkpoint task → online Copilot inference in Actions → private draft → authenticated editor verification/edit → explicit publish → public URL and sitemap refresh.
 - Cleanup: authenticated admin can permanently delete an unpublished/unqualified draft; audit the action. Published content must be unpublished before deletion.
 
 ## Safety invariants
 
 1. AI output is never published automatically.
 2. Drafts, evidence notes and admin endpoints are private.
-3. The shared engine token is only used server-side/GitHub Actions, never shipped to browser JavaScript.
+3. The engine token and Copilot token are only used server-side/GitHub Actions, never shipped to browser JavaScript.
 4. A published article must have an approved state and an audit record.
 5. Public article listing, article detail and sitemap include only published content.
 6. RSS snippets are discovery clues, not proof. Source verification is an explicit editorial requirement.
@@ -24,6 +24,16 @@ Status: Frozen on 2026-10-19. Do not change components without explicit user ins
 8. Do not change production Worker routes or DNS during staging.
 9. Category label is business compliance; avoid small-business compliance.
 
-## Resource/free constraints
+## AI and secrets
 
-The runner downloads model files at run time and has no durable local state. D1 checkpoints are the source of truth. The model file and inference cache must not be committed to Git. If install/download/inference fails, fail the workflow safely and retain the checkpoint for retry. Do not fall back to any paid service.
+- No Ollama, llama.cpp, GGUF files, Hugging Face model downloads, or local inference.
+- Add repository Actions secret `COPILOT_PAT` containing a token permitted to use GitHub Copilot CLI. Do not paste it into code, issues, logs or chat.
+- Existing engine secrets remain `ENGINE_API_URL` and `ENGINE_API_TOKEN`.
+- The workflow fails clearly if the required token is missing. Copilot plan access, policy, and usage limits must be confirmed on the GitHub account. Do not configure paid overflow or automatic billing.
+- Model choice is configured through `COPILOT_MODEL` in the workflow; test availability before relying on it.
+
+## Retry and editorial controls
+
+The workflow uses persisted research checkpoints. If online inference fails, it returns the task to the pending runner state and logs a short safe diagnostic. A later manual run can retry; scheduled execution remains disabled until acceptance.
+
+No article is published automatically. Source metadata is not independent source verification, and every draft must be reviewed before publication.
