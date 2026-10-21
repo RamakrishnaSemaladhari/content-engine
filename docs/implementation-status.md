@@ -11,6 +11,7 @@
 
 ## Implemented in branch freeze-github-runner-ai-workflow
 - [x] Worker research flow checkpoints a task for GitHub Actions online inference.
+- [x] RSS/Atom feed repair, bounded retries/timeouts, source scoring, canonical deduplication and feed diagnostics are included in this branch.
 - [x] Runner claim lease is 30 minutes.
 - [x] Added generic runner claim/completion routes; legacy /api/local/* endpoints remain aliases for compatibility with existing staged callers.
 - [x] GitHub Actions installs GitHub Copilot CLI and invokes online model inference; no inference runtime or model weights are installed.
@@ -31,6 +32,7 @@
 - POST /api/runner/claim: authenticated claim of an online-AI task.
 - POST /api/runner/complete: authenticated result submission; stores a private draft.
 - Legacy POST /api/local/claim and /api/local/complete remain compatibility aliases only; they do not run local AI.
+- The D1 schema retains the enum value `LOCAL_AI_PENDING` internally for compatibility; public API status is `RUNNER_AI_PENDING` and stage/audit details identify the GitHub Copilot runner.
 - GET /api/drafts and GET /api/drafts/{id}: authenticated draft inspection.
 - The browser must never receive the shared engine or Copilot token.
 
