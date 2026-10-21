@@ -127,7 +127,7 @@ async function runDaily(req, env) {
     candidates:candidates.slice(0,12).map(c=>({title:c.title,url:c.url,publisher:c.publisher,host:c.host,publishedAt:c.publishedAt,snippet:c.snippet,scores:c.scores}))
   };
   await checkpoint(db,jobId,"ai_task",task);
-  await db.prepare("UPDATE jobs SET status='RUNNER_AI_PENDING',stage='github_runner_ai',quota_state='NOT_USED',lease_owner=NULL,lease_until=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(jobId).run();
+  await db.prepare("UPDATE jobs SET status='LOCAL_AI_PENDING',stage='github_runner_ai',quota_state='NOT_USED',lease_owner=NULL,lease_until=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(jobId).run();
   await audit(db,jobId,"AI_HANDOFF","Checkpoint ready for online GitHub Copilot inference from Actions");
   return json({jobId,status:"RUNNER_AI_PENDING",candidateCount:candidates.length,processor:"github-copilot-online"});
 }
@@ -150,7 +150,7 @@ async function completeRunner(req,env) {
   const db=env.DB, job=await db.prepare("SELECT status,lease_owner FROM jobs WHERE id=?").bind(body.jobId).first();
   if (!job || job.status!=="DRAFT_PENDING" || job.lease_owner!=="github-runner-ai") return json({error:"JOB_NOT_CLAIMED"},409);
   if (body.errorCode) {
-    await db.prepare("UPDATE jobs SET status='RUNNER_AI_PENDING',stage='github_runner_ai',last_error_code='RUNNER_AI_FAILED',last_error_safe=?,lease_owner=NULL,lease_until=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(String(body.errorSafe||"GitHub online AI task failed").slice(0,80),body.jobId).run();
+    await db.prepare("UPDATE jobs SET status='LOCAL_AI_PENDING',stage='github_runner_ai',last_error_code='RUNNER_AI_FAILED',last_error_safe=?,lease_owner=NULL,lease_until=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(String(body.errorSafe||"GitHub online AI task failed").slice(0,80),body.jobId).run();
     await audit(db,body.jobId,"RUNNER_RETRY","GitHub online AI task failed");
     return json({status:"RUNNER_AI_PENDING"});
   }
