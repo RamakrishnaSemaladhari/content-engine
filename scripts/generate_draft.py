@@ -80,7 +80,7 @@ def main():
     )
     try:
         proc = subprocess.run(
-            ["copilot", "-p", prompt, "-s", "--no-ask-user"],
+            ["copilot", "-p", prompt, "-s", "--no-ask-user", "--max-ai-credits=30"],
             check=False, capture_output=True, text=True, timeout=1500,
             env={**os.environ, "COPILOT_GITHUB_TOKEN": COPILOT_TOKEN})
         if proc.returncode:
