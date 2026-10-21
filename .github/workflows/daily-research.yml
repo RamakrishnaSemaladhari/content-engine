@@ -1,60 +1,48 @@
-name: Daily Research Queue
+name: FiveCheckMate Research and Draft
 
 on:
   workflow_dispatch:
+  # Scheduling remains disabled until live end-to-end acceptance passes.
 
 permissions:
   contents: read
 
 concurrency:
-  group: fivecheckmate-daily-research
+  group: fivecheckmate-research-draft
   cancel-in-progress: false
 
 jobs:
-  enqueue:
+  research-and-draft:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
-      - name: Validate configuration
+      - name: Check required secrets and free-tier gate
         env:
           ENGINE_API_URL: ${{ secrets.ENGINE_API_URL }}
           ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_FREE_TIER_CONFIRMED: ${{ vars.GEMINI_FREE_TIER_CONFIRMED }}
         run: |
           set -euo pipefail
-          missing=0
-          if [ -z "${ENGINE_API_URL}" ]; then
-            echo "::error::ENGINE_API_URL is missing or unavailable to this workflow."
-            missing=1
-          fi
-          if [ -z "${ENGINE_API_TOKEN}" ]; then
-            echo "::error::ENGINE_API_TOKEN is missing or unavailable to this workflow."
-            missing=1
-          fi
-          if [ "$missing" -ne 0 ]; then
-            echo "Check Settings > Secrets and variables > Actions > Repository secrets. Names must match exactly. No network request was made."
-            exit 1
-          fi
-          case "$ENGINE_API_URL" in
-            https://*) ;;
-            *) echo "::error::ENGINE_API_URL must use HTTPS"; exit 1 ;;
-          esac
-      - name: Create or resume daily job
+          test -n "$ENGINE_API_URL" || { echo "::error::Missing ENGINE_API_URL repository secret"; exit 1; }
+          test -n "$ENGINE_API_TOKEN" || { echo "::error::Missing ENGINE_API_TOKEN repository secret"; exit 1; }
+          test -n "$GEMINI_API_KEY" || { echo "::error::Missing GEMINI_API_KEY repository secret"; exit 1; }
+          test "$GEMINI_FREE_TIER_CONFIRMED" = "true" || { echo "::error::Blocked: set repository variable GEMINI_FREE_TIER_CONFIRMED=true only after confirming the Google AI Studio project has no linked billing account and remains on Free tier."; exit 1; }
+          case "$ENGINE_API_URL" in https://*) ;; *) echo "::error::ENGINE_API_URL must use HTTPS"; exit 1;; esac
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Validate JavaScript and Python syntax
+        run: |
+          node --check cloudflare/src/index.js
+          node --check insights-worker/src/index.js
+          node --check preview/worker.js
+          python -m py_compile scripts/generate_draft.py
+      - name: Run research, ask Gemini Free Tier, and save an unpublished draft
         env:
           ENGINE_API_URL: ${{ secrets.ENGINE_API_URL }}
           ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
-        run: |
-          set -euo pipefail
-          code="$(curl --silent --show-error --output /tmp/response.json --write-out '%{http_code}' \
-            --max-time 60 --request POST \
-            --header "Authorization: Bearer $ENGINE_API_TOKEN" \
-            --header "Content-Type: application/json" \
-            --data '{"mode":"daily","maxCandidates":40}' \
-            "$ENGINE_API_URL/api/run/daily")"
-          if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
-            echo "::error::Worker returned HTTP $code."
-            echo "Worker response body (may contain diagnostic details):"
-            cat /tmp/response.json
-            exit 1
-          fi
-          echo "Daily job accepted. Response:"
-          cat /tmp/response.json
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_FREE_TIER_CONFIRMED: ${{ vars.GEMINI_FREE_TIER_CONFIRMED }}
+        run: python scripts/generate_draft.py

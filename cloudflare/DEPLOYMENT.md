@@ -43,3 +43,11 @@ The API token should be a long random value. Use the same value in GitHub Action
 - Local Ollama worker requires the same values in local-ollama/.env (copy .env.example first).
 - The workflow is manual-only until a complete end-to-end test passes. The schedule has intentionally been removed to avoid unattended failed runs.
 - Do not enable the schedule until the health endpoint, daily job creation, local claim/complete, and unpublished draft state have been tested.
+
+## v0.2.0 deploy and test order (secret names only)
+1. `cd cloudflare && npm test`  (8 tests must pass)
+2. Deploy the Worker (wrangler deploy, or upload src/ as modules). Do NOT touch Workers `fivecheckmate` or `5checkmate`.
+3. Generate a NEW random token. Put it only in: Worker secret `ENGINE_API_TOKEN` (`wrangler secret put ENGINE_API_TOKEN`) and GitHub Actions secret `ENGINE_API_TOKEN`. Set GitHub secret `ENGINE_API_URL` to the Worker base URL. Retire any token that was ever pasted in chat.
+4. Actions > Daily Research Queue > Run workflow with `diagnostics` ticked. Expect `feeds ok: N/5`.
+5. Run it again unticked. Expect a job, then a draft with status UNPUBLISHED in `GET /api/drafts`.
+6. Only after step 5 succeeds: uncomment the `schedule:` block in the workflow (07:00 IST). Scheduled runs only create unpublished drafts.

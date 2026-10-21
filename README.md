@@ -1,49 +1,44 @@
-# Content Engine
+# FiveCheckMate Content Engine
 
-Quota-aware research and article-drafting pipeline for FiveCheckMate. This repository contains workflow code and templates only. Drafts, evidence notes, credentials and article content must not be committed here.
+Research and unpublished article drafting for FiveCheckMate Insights. GitHub Actions orchestrates the workflow; online inference uses the Google Gemini API Free tier only.
 
-## Architecture
+## Workflow
 
-1. GitHub Actions starts a manually triggered run (daily scheduling remains disabled until end-to-end validation).
-2. A Cloudflare Worker fetches public RSS/search feeds, deduplicates and scores candidates, and persists each stage in Cloudflare D1.
-3. Cloudflare Workers AI is attempted only while configured and available. If unavailable, quota-limited, or errored, the job is saved as LOCAL_AI_PENDING.
-4. The local Windows/Ubuntu worker polls the authenticated Worker API, processes pending tasks with Ollama, and submits results.
-5. Completed articles remain unpublished until a human approves them.
+1. Manually run **FiveCheckMate Research and Draft** from GitHub Actions. Scheduled execution is disabled.
+2. The content engine searches Google News RSS, deduplicates candidates, scores metadata and persists source/task checkpoints in Cloudflare D1.
+3. GitHub Actions claims the checkpoint and sends evidence and instructions to Gemini 3.1 Flash-Lite.
+4. The content engine stores the result as an unpublished draft.
+5. An editor imports the draft in the authenticated Insights portal, verifies sources, edits and uses explicit editorial review/publish controls. Nothing is auto-published.
 
-GitHub Actions is an orchestrator, not an AI model. No paid AI API is configured.
+## Free-only AI guardrail
 
-## Current status
+The workflow requires the repository variable GEMINI_FREE_TIER_CONFIRMED to equal true. Set it only after verifying in Google AI Studio that the project/key is on the Free tier and has no linked billing account. Gemini API keys inherit their project's billing tier; a key linked to a billed project is not a free-only guarantee. With a project remaining on Free tier, quota exhaustion should stop requests; the workflow has no paid-provider fallback and does not retry using another provider. If quota is exhausted, wait for reset.
 
-This repository is deployed as a separate Cloudflare Worker (`fivecheckmate-content-engine`) with a D1 database (`fivecheckmate-content-engine`). The Worker is not connected to or replacing the live FiveCheckMate website. Health and end-to-end HTTP behavior still require live validation; the daily schedule remains disabled.
+Gemini free-tier model availability and quotas can change. This workflow uses gemini-3.1-flash-lite; confirm it is available to the Free-tier project before enabling the gate. Do not add billing or upgrade the project to restore service.
 
-## Free-tier safeguards
+GitHub Actions itself may have usage limits or charges depending on repository visibility and account billing. Keep its applicable usage hard-stop configured. Workflow runtime is capped at 10 minutes, which is not itself a billing guarantee.
 
-- Never configure a paid model/provider as fallback.
-- Treat quota errors, timeouts and provider errors as a handoff to local Ollama.
-- Persist checkpoints before and after expensive stages; resume an existing LOCAL_AI_PENDING job instead of rediscovering sources.
-- Use idempotency keys and unique source URLs to avoid duplicate jobs.
-- Keep draft data and evidence notes in D1, not GitHub files or Actions logs.
-- Human approval is mandatory; this pipeline must not publish automatically.
-- Keep all work within free tiers; stop safely and checkpoint before exhausting quotas; use local Ollama rather than any paid API.
-- Runner minutes, Cloudflare quotas, feed terms and local hardware availability still apply.
+## GitHub Actions secrets and variable
 
-## Setup outline
+- ENGINE_API_URL: https://fivecheckmate-content-engine.kingramakrishna.workers.dev
+- ENGINE_API_TOKEN: the existing content-engine bearer token.
+- GEMINI_API_KEY: API key from the Google AI Studio project that remains on Free tier without linked billing.
+- Repository variable GEMINI_FREE_TIER_CONFIRMED: set to true only after independently verifying the project's Free-tier/no-billing status.
 
-1. Cloudflare Worker and D1 have been created and the schema has been applied.
-2. Add GitHub Actions secrets ENGINE_API_URL and ENGINE_API_TOKEN.
-3. Configure local Ollama and test the Worker manually before enabling the schedule.
-5. On the local machine, install Python dependencies and Ollama. Copy local-ollama/.env.example to .env, set the Worker URL/token and model name, then run the worker.
-6. Test checkpointing, quota fallback and unpublished draft status before enabling daily automation.
+Never commit or print tokens. Do not place a token in browser code.
 
-## Security
+## AI implementation boundary
 
-Never put secrets in source files, commits, issue comments, workflow output, or screenshots. Use GitHub Actions Secrets and Cloudflare Worker secrets. Only non-sensitive source code and templates belong in this public repository.
+- Online Gemini API inference from a GitHub-hosted runner; no local model.
+- No Copilot CLI, no paid AI provider fallback, no automatic model/provider fallback.
+- No local Ollama, llama.cpp, GGUF download, Hugging Face model download, or CPU-local inference.
+- Inference failures and quota exhaustion stop the run; the checkpoint is retained for a later manual retry.
+- Keep the scheduled trigger disabled until end-to-end acceptance passes.
 
-## FiveCheckMate Insights editorial website
+## Editorial and deployment safeguards
 
-- Staging visitor blog and role-based editorial portal: https://fivecheckmate-blog-preview.kingramakrishna.workers.dev
-- Editorial API and D1 backend: https://fivecheckmate-insights.kingramakrishna.workers.dev
-- The staging portal proxies same-origin `/api/*` calls to the backend so session cookies remain host-scoped to the staging UI.
-- Initial setup uses the existing Cloudflare `BOOTSTRAP_TOKEN` and `SESSION_SECRET` secrets. Create the first administrator once, then add staff accounts with the least-privilege roles: `editor`, `reviewer`, or `publisher`.
-- Publishing remains a human-controlled action. Public visitor pages show only published articles; editorial users can create drafts, submit for review, approve/reject, publish/unpublish, manage staff (admin only), and review audit events.
-- Reproducible staging UI source is in `preview/worker.js`. The preview Worker is separate from the production website worker and custom domain.
+- Drafts remain private and unpublished. The model must not invent facts or source verification.
+- RSS snippets are discovery clues, not verification. Direct source checking and editorial approval are required.
+- The published site must render published articles dynamically; adding an article must not require site deployment.
+- Do not change production Worker routes or DNS during staging.
+- Public category wording is “business compliance”.
