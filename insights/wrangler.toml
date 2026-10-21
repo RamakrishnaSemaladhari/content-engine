@@ -1,0 +1,14 @@
+name = "fivecheckmate-insights-staging-v2"
+main = "src/worker.js"
+compatibility_date = "2026-10-18"
+[[d1_databases]]
+binding = "DB"
+database_name = "fivecheckmate-insights-staging"
+database_id = "a10a355f-aef6-4dee-81a6-b7156925ad0c"
+migrations_dir = "migrations"
+
+# Read-only use: lists/imports UNPUBLISHED engine drafts (SELECT only). Same ID as the content-engine D1.
+[[d1_databases]]
+binding = "CONTENT_DB"
+database_name = "fivecheckmate-content-engine"
+database_id = "050c8bbf-172e-4369-8058-40d84052d2b2"
