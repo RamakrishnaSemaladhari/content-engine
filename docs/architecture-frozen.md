@@ -30,7 +30,7 @@ Status: Updated 2026-10-22 at the user's direction. AI inference is online throu
 - Add repository Actions secret `COPILOT_PAT` containing a token permitted to use GitHub Copilot CLI. Do not paste it into code, issues, logs or chat.
 - Existing engine secrets remain `ENGINE_API_URL` and `ENGINE_API_TOKEN`.
 - The workflow fails clearly if the required token is missing. Copilot plan access, policy, and usage limits must be confirmed on the GitHub account. Do not configure paid overflow or automatic billing.
-- Model choice is configured through `COPILOT_MODEL` in the workflow; test availability before relying on it.
+- Let Copilot CLI use the account's default/auto model selection to avoid hard-coding a model that may not be enabled for the account.
 
 ## Retry and editorial controls
 
