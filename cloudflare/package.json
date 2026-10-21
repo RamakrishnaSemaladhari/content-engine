@@ -1,0 +1,1 @@
+{"name":"fivecheckmate-content-engine","private":true,"type":"module","scripts":{"test":"node --test test/engine.test.js test/pipeline.test.js"}}
