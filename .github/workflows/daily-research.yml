@@ -47,5 +47,4 @@ jobs:
           ENGINE_API_URL: ${{ secrets.ENGINE_API_URL }}
           ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
           COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_PAT }}
-          COPILOT_MODEL: gpt-4.1
         run: python scripts/generate_draft.py
