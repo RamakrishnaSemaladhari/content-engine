@@ -1,43 +1,35 @@
 # FiveCheckMate Content Engine
 
-Free-only research and article drafting for FiveCheckMate Insights. The architecture is frozen in docs/architecture-frozen.md.
-
-## Frozen architecture
-
-1. GitHub Actions is the sole workflow trigger/orchestrator.
-2. The GitHub-hosted Ubuntu runner (4 vCPU / 16 GB class) runs a quantized Qwen 2.5 3B GGUF model locally on CPU through llama.cpp. No local Ollama, no paid AI API, and no Cloudflare Workers AI inference.
-3. The Cloudflare content-engine Worker + D1 persist research jobs, source metadata, task checkpoints, drafts, status and audit events.
-4. The existing Insights admin portal handles login, editing, preview, explicit publish/unpublish, and deletion of unpublished drafts. Published articles are served dynamically by the existing website; adding an article must not require redeploying the site.
-5. No article is published automatically. Source discovery metadata is not independent source verification; editor verification is required.
+Research and unpublished article drafting for FiveCheckMate Insights. GitHub Actions is the workflow orchestrator; online AI inference is through GitHub Copilot CLI.
 
 ## Workflow
 
-- Run manually from GitHub Actions (workflow_dispatch); scheduled execution stays disabled until live end-to-end acceptance passes.
-- Worker searches Google News RSS, deduplicates candidates, scores metadata and persists source/task checkpoints.
-- Runner downloads a quantized open-weight model to the temporary runner, claims the checkpointed task, generates structured JSON and submits the result to the Worker.
-- Worker stores the result as an unpublished draft and confirms published: false.
-- The editor opens the authenticated admin portal, reviews evidence, edits and explicitly publishes. The public website reads only published articles.
-- Unpublished, unqualified drafts can be permanently deleted from the authenticated admin portal. Deletion is audited. Published articles must be unpublished before deletion.
+1. Manually run **FiveCheckMate Research and Draft** from GitHub Actions. Scheduled execution is disabled.
+2. The engine searches Google News RSS, deduplicates candidates, scores metadata and persists source/task checkpoints in Cloudflare D1.
+3. GitHub Actions claims the checkpoint and asks online GitHub Copilot to prepare structured draft JSON. No local model is downloaded or run.
+4. The content engine stores the result as an unpublished draft.
+5. An editor imports the draft in the authenticated Insights portal, verifies sources, edits and uses the explicit editorial review/publish controls. Nothing is auto-published.
 
-## Free-tier and security rules
+## GitHub Actions secrets
 
-- No paid AI APIs or local Ollama.
-- The model is downloaded to the ephemeral GitHub runner; it is not stored on the user's computer or committed to Git.
-- Keep Actions logs free of tokens, full prompts, source text and article bodies.
-- Use repository Actions secrets ENGINE_API_URL and ENGINE_API_TOKEN.
-- Do not enable a schedule until the real workflow and publishing journey pass end-to-end tests.
-- Do not change the production website Worker or DNS during staging.
-- Never represent RSS headlines/snippets as verified facts. Legal allegations must be attributed, corroborated and reviewed before publication.
-- The public category wording is business compliance, not small-business compliance.
+- `ENGINE_API_URL`: `https://fivecheckmate-content-engine.kingramakrishna.workers.dev`
+- `ENGINE_API_TOKEN`: the existing content-engine bearer token.
+- `COPILOT_PAT`: a securely stored token permitted to use GitHub Copilot CLI on behalf of your account.
 
-## Current implementation boundary
+Never commit or print tokens. Do not place a token in browser code.
 
-The content-engine Worker now runs discovery/checkpointing and runner task claiming/completion without Workers AI inference. A separate staging editorial API Worker (fivecheckmate-insights-staging-v2) is deployed with a CONTENT_DB binding, and the staging preview portal has an Import research drafts action. Imported articles remain editorial drafts and use the existing role-gated submit/approve/publish workflow. Live browser/API end-to-end acceptance is still pending; production website Worker and DNS were not changed.
+## AI implementation boundary
 
-## Manual setup
+- Online GitHub Copilot CLI called from a GitHub-hosted runner.
+- No local Ollama, llama.cpp, GGUF download, Hugging Face model download, or CPU-local inference.
+- GitHub Copilot access may depend on account entitlement and service limits. This is not a promise of unlimited or free hosted inference; do not enable any paid overflow/automatic billing without explicit approval.
+- GitHub Models inference API is not used; it was retired in July 2026.
+- Inference failures retain the checkpoint for a later manual retry. Keep the scheduled trigger disabled until end-to-end acceptance passes.
 
-Configure repository Actions secrets:
-- ENGINE_API_URL=https://fivecheckmate-content-engine.kingramakrishna.workers.dev
-- ENGINE_API_TOKEN: the current Worker token stored as a GitHub Actions secret.
+## Editorial and deployment safeguards
 
-Do not put the token in this repository, a commit, or Actions output.
+- Drafts remain private and unpublished. The model must not invent facts or source verification.
+- RSS snippets are discovery clues, not verification. Direct source checking and editorial approval are required.
+- The published site must render published articles dynamically; adding a new article must not require site deployment.
+- Do not change production Worker routes or DNS during staging.
+- Public category wording is “business compliance”.
