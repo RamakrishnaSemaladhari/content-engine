@@ -24,7 +24,7 @@ Never commit or print tokens. Do not place a token in browser code.
 - No local Ollama, llama.cpp, GGUF download, Hugging Face model download, or CPU-local inference.
 - GitHub Copilot access may depend on account entitlement and service limits. This is not a promise of unlimited or free hosted inference; do not enable any paid overflow/automatic billing without explicit approval.
 - GitHub Models inference API is not used; it was retired in July 2026.
-- Inference failures retain the checkpoint for a later manual retry. Keep the scheduled trigger disabled until end-to-end acceptance passes.
+- Copilot CLI uses the account's default model selection. Inference failures retain the checkpoint for a later manual retry. Keep the scheduled trigger disabled until end-to-end acceptance passes.
 
 ## Editorial and deployment safeguards
 
