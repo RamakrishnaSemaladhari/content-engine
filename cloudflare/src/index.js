@@ -292,10 +292,18 @@ async function runDraft(req, env) {
     const rawText = String(ai.response || ai.output_text || "");
     try { raw = JSON.parse(rawText.slice(rawText.indexOf("{"), rawText.lastIndexOf("}") + 1)); } catch {}
     const modelClaims = Array.isArray(raw.claims) ? raw.claims : [];
-    const claims = modelClaims.slice(0, 30).map(x => "- [" + (x && x.basis === "source_text" && evidence === "SOURCE_TEXT" ? "in source text" : "UNVERIFIED") + "] " + String(x && x.claim || x).slice(0, 220));
+    const normalizedEvidence = String(ex && ex.text || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    const claims = modelClaims.slice(0, 30).map(x => {
+      const claim = String(x && x.claim || x).slice(0, 220);
+      const normalizedClaim = claim.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+      // Never trust the model's own basis label. Only mark an exact normalized phrase match;
+      // even that is not proof of entailment, truth, or correct context.
+      const exactPhrase = evidence === "SOURCE_TEXT" && normalizedClaim.length >= 20 && normalizedEvidence.includes(normalizedClaim);
+      return "- [" + (exactPhrase ? "exact phrase in retrieved text; not fact-checked" : "UNVERIFIED") + "] " + claim;
+    });
     const claimAudit = claims.length
-      ? "CLAIM TAGGING: model-supplied list; it is not an exhaustive extraction of every factual statement in the article. Each item still requires editor verification.\n"
-      : "CLAIM TAGGING: model supplied no claim list. Treat all incident-specific statements as UNVERIFIED and review the full article.\n";
+      ? "CLAIM TAGGING: model-supplied, non-exhaustive list. Labels only indicate exact normalized phrase matches in retrieved text; they do NOT verify meaning, context, truth, or official records. Editor must verify every claim.\\n"
+      : "CLAIM TAGGING: model supplied no claim list. Treat all incident-specific statements as UNVERIFIED and review the full article.\\n";
     let extra = "";
     if (Array.isArray(raw.suggested_headings)) extra += "Suggested headings: " + raw.suggested_headings.slice(0, 8).map(String).join(" | ") + "\n";
     if (raw.seo_title) extra += "SEO title: " + String(raw.seo_title).slice(0, 70) + "\n";
