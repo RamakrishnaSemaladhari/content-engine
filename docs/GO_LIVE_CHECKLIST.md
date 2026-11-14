@@ -5,7 +5,8 @@ Everything below is staging only. Production Workers `fivecheckmate` / `5checkma
 ## Verified before this release (evidence)
 | Check | Result |
 |---|---|
-| Engine tests (17), Insights tests (5), UI syntax | PASS on the merged release branch |
+| Engine tests (25), Insights tests (5), UI syntax | PASS on the merged release branch |
+| Workflow retry handling (network failure -> 3 bounded attempts, clear error) | PASS against an unreachable server |
 | `wrangler deploy --dry-run` for engine, insights, UI | PASS: bundles, bindings correct (DB+AI / DB+CONTENT_DB / none) |
 | Insights Worker in the real local Workers runtime: first-admin setup, login, create, submit, approve, publish, public page, unpublish; drafts private (401); early publish refused (409); cross-origin refused (403) | PASS |
 | Engine Worker in the real local runtime: health v0.3.0, auth, queue routes, controlled `SOURCE_FETCH_FAILED` with per-feed reasons when offline | PASS |
@@ -13,6 +14,10 @@ Everything below is staging only. Production Workers `fivecheckmate` / `5checkma
 | Live Workers AI drafting, live Google News feeds | NOT TESTED: cannot be exercised outside Cloudflare |
 
 Live state when this was prepared: engine Worker still the old build, engine D1 has no `candidates` table (migration pending), staging Insights has 0 users / 0 articles.
+
+## What the engine checks, and what it does NOT (read before publishing anything)
+Automated: undated and stale stories are excluded; duplicates removed; the original article page is fetched when reachable (https only, internal addresses blocked, size/time limited); every draft records `EVIDENCE: original article text retrieved` or `HEADLINE_ONLY (reason)`; claims are tagged `[in source text]` or `[UNVERIFIED]`; drafts that are too short, lack headings, assert guilt/conviction, contain links not from the source, or cite statutes/case numbers without source text are failed or flagged `NEEDS_REVIEW`.
+NOT automated: legal accuracy; official records or court orders; independent corroboration by a second publisher; verification of the publisher itself (the trusted-publisher list is a scoring heuristic). Google News links often cannot be resolved to the publisher page, so many drafts will be `HEADLINE_ONLY`: the editor must read the original report before publishing. Local Ollama is intentionally not part of this design (repo README: "no local Ollama fallback").
 
 ## One-time setup (you; secret values never go in chat, code or logs)
 1. Create a NEW scoped Cloudflare API token: Workers Scripts:Edit and D1:Edit, restricted to your account. Do not reuse a token that was ever pasted in chat. Revoke those.

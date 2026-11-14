@@ -40,3 +40,6 @@ The intended provider is the existing Cloudflare Workers AI binding. There is no
 ## Deployment documentation
 
 `cloudflare/DEPLOYMENT.md` is the authoritative manual deployment and staging acceptance checklist. It was updated in this branch to remove the obsolete local-Ollama handoff instructions and clarify that live checks remain outstanding.
+| Review round 2: retry `000000` bug, undated stories, heuristic wording, source retrieval, draft validation | FIXED + tested (25 tests) | Also found and fixed a draft-slug collision for same-day drafts |
+| Review round 2: Ollama not in queue | BY DESIGN | documented in README; not restored |
+| Review round 2: live end-to-end | NOT TESTED | requires deploy; see GO_LIVE_CHECKLIST |

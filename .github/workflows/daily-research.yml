@@ -45,7 +45,8 @@ jobs:
           [ -n "${ENGINE_API_TOKEN:-}" ] || { echo "::error::Secret ENGINE_API_TOKEN is missing."; exit 1; }
           case "$ENGINE_API_URL" in https://*) ;; *) echo "::error::ENGINE_API_URL must be https://"; exit 1;; esac
           echo "ENGINE_API_URL=${ENGINE_API_URL%/}" >> "$GITHUB_ENV"
-          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "${ENGINE_API_URL%/}/api/health" || echo 000)
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "${ENGINE_API_URL%/}/api/health") || code=000
+          code=$(printf '%s' "$code" | tail -c 3)
           [ "$code" = 200 ] || { echo "::error::Worker health returned HTTP $code."; exit 1; }
       - name: Run phase
         run: |
@@ -53,9 +54,12 @@ jobs:
           call() {  # call METHOD PATH -> sets $code, writes resp.json. Retries 429?/5xx/network only for non-draft phases.
             local m="$1" p="$2" tries="${3:-3}" a
             for a in $(seq 1 "$tries"); do
+              # On curl failure the -w output may already hold "000"; never append a second one.
               code=$(curl -sS -o resp.json -w '%{http_code}' --max-time 100 -X "$m" \
                 -H @<(printf 'Authorization: Bearer %s\n' "$ENGINE_API_TOKEN") \
-                -H 'Content-Type: application/json' --data '{}' "$ENGINE_API_URL$p" || echo 000)
+                -H 'Content-Type: application/json' --data '{}' "$ENGINE_API_URL$p") || code=000
+              code=$(printf '%s' "$code" | tail -c 3)
+              [ -s resp.json ] || echo '{}' > resp.json
               case "$code" in
                 2*|429) return 0 ;;
                 401) echo "::error::HTTP 401: ENGINE_API_TOKEN (GitHub) does not match the Worker secret. Not retrying."; exit 1 ;;
