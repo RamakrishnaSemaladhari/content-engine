@@ -52,7 +52,7 @@ test("Day 2: one article per request, UNPUBLISHED draft with source + verificati
   assert.equal(r.body.status, "DRAFT_READY"); assert.equal(r.body.published, false); assert.equal(r.body.remaining, 0);
   const d = q("SELECT status,verification_notes,source_list_json FROM drafts").get();
   assert.equal(d.status, "UNPUBLISHED"); assert.match(d.verification_notes, /Suggested headings: Check title/); assert.match(d.source_list_json, /telanganatoday\.com/);
-  assert.match(d.verification_notes, /EVIDENCE: original article text retrieved from https:\/\/news\.example/);
+  assert.match(d.verification_notes, /EVIDENCE: original article text retrieved from https:\/\/www\.telanganatoday\.com/);
   assert.match(d.verification_notes, /\[exact phrase in retrieved text; not fact-checked\] Police in Hyderabad arrested/); assert.match(d.verification_notes, /\[UNVERIFIED\] Fake documents/);
   assert.equal(q("SELECT status FROM candidates WHERE job_id IS NOT NULL").get().status, "DRAFTED");
   assert.equal((await call("/api/run/draft")).body.status, "NOTHING_SELECTED");
