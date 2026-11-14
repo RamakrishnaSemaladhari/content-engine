@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {isSafeHttpsUrl, decodeGoogleNewsUrl, extractArticle, fetchSourceExtract, validateDraft} from "../src/extract.js";
 import {getCandidates} from "../src/index.js";
 import {CONFIG} from "../src/config.js";
+import {fetchFeed} from "../src/feeds.js";
 
 const page = "<html><head><meta property='og:title' content='Big story'><meta property='article:published_time' content='2026-11-10'></head><body><script>var x=1</script><article>" + "<p>Officials said the accused sold the same plot to several buyers using forged documents in Hyderabad.</p>".repeat(6) + "</article></body></html>";
 const html = (b, h = {}) => new Response(b, {headers: {"content-type": "text/html", ...h}});
@@ -48,4 +49,28 @@ test("undated stories are rejected from the shortlist (freshness cannot be prove
   const r = await getCandidates(40, {...CONFIG, retries: 0}, f);
   assert.equal(r.candidates.length, 0); assert.ok(r.summary.undated >= 1);
   const r2 = await getCandidates(40, {...CONFIG, retries: 0, allowUndated: true}, f); assert.equal(r2.candidates.length, 1);
+});
+
+test("RSS feed byte ceiling is enforced while streaming, including chunked bodies", async () => {
+  let cancelled = false;
+  const body = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode("<rss>" + "x".repeat(40)));
+      controller.enqueue(new TextEncoder().encode("y".repeat(40) + "</rss>"));
+    },
+    cancel() { cancelled = true; }
+  });
+  const result = await fetchFeed("https://feeds.example/rss", {...CONFIG, retries: 0, maxFeedBytes: 32}, async () =>
+    new Response(body, {headers: {"content-type": "application/rss+xml"}}));
+  assert.equal(result.items.length, 0);
+  assert.equal(result.diag.error, "FEED_TOO_LARGE");
+  assert.ok(result.diag.bytes > 32);
+  assert.equal(cancelled, true);
+});
+
+test("RSS feed declared oversized Content-Length is rejected before reading", async () => {
+  const result = await fetchFeed("https://feeds.example/rss", {...CONFIG, retries: 0, maxFeedBytes: 32}, async () =>
+    new Response("x".repeat(64), {headers: {"content-type": "application/rss+xml", "content-length": "64"}}));
+  assert.equal(result.diag.error, "FEED_TOO_LARGE");
+  assert.equal(result.diag.bytes, 64);
 });
