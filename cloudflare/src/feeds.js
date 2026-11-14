@@ -60,6 +60,34 @@ export function buildFeedUrl(cfg, q) {
   return cfg.googleNewsRssBase + "?q=" + encodeURIComponent(q + " when:" + cfg.maxAgeDays + "d") +
     "&hl=" + cfg.language + "&gl=" + cfg.region + "&ceid=" + cfg.ceid;
 }
+/** Read a feed with a hard byte ceiling; Content-Length is only an early hint. */
+export async function readFeedBodyLimited(response, maxBytes) {
+  if (!response.body) return {text: "", bytes: 0, tooLarge: false};
+  const declared = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    await response.body.cancel().catch(() => {});
+    return {text: "", bytes: declared, tooLarge: true};
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let bytes = 0, text = "";
+  try {
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > maxBytes) {
+        await reader.cancel("FEED_TOO_LARGE").catch(() => {});
+        return {text: "", bytes, tooLarge: true};
+      }
+      text += decoder.decode(value, {stream: true});
+    }
+    text += decoder.decode();
+    return {text, bytes, tooLarge: false};
+  } finally {
+    try { reader.releaseLock(); } catch {}
+  }
+}
 /** Fetch one feed with timeout, size cap and bounded retry. Always resolves with a diagnostics record. */
 export async function fetchFeed(url, cfg, fetchImpl = fetch) {
   const diag = { ok: false, status: null, bytes: 0, items: 0, attempts: 0, error: null, ms: 0 };
@@ -72,10 +100,10 @@ export async function fetchFeed(url, cfg, fetchImpl = fetch) {
       diag.status = res.status;
       if (res.status === 429 || res.status >= 500) { diag.error = "HTTP_" + res.status; continue; }
       if (!res.ok) { diag.error = "HTTP_" + res.status; break; }
-      const body = await res.text();
-      diag.bytes = body.length;
-      if (body.length > cfg.maxFeedBytes) { diag.error = "FEED_TOO_LARGE"; break; }
-      const items = parseFeed(body);
+      const read = await readFeedBodyLimited(res, cfg.maxFeedBytes);
+      diag.bytes = read.bytes;
+      if (read.tooLarge) { diag.error = "FEED_TOO_LARGE"; break; }
+      const items = parseFeed(read.text);
       diag.items = items.length;
       if (!items.length) { diag.error = /<html/i.test(body.slice(0, 500)) ? "HTML_NOT_FEED" : "NO_ITEMS"; break; }
       diag.ok = true; diag.error = null; diag.ms = Date.now() - t0;
