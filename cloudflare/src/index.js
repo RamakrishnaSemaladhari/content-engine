@@ -302,8 +302,8 @@ async function runDraft(req, env) {
       return "- [" + (exactPhrase ? "exact phrase in retrieved text; not fact-checked" : "UNVERIFIED") + "] " + claim;
     });
     const claimAudit = claims.length
-      ? "CLAIM TAGGING: model-supplied, non-exhaustive list. Labels only indicate exact normalized phrase matches in retrieved text; they do NOT verify meaning, context, truth, or official records. Editor must verify every claim.\\n"
-      : "CLAIM TAGGING: model supplied no claim list. Treat all incident-specific statements as UNVERIFIED and review the full article.\\n";
+      ? "CLAIM TAGGING: model-supplied, non-exhaustive list. Labels only indicate exact normalized phrase matches in retrieved text; they do NOT verify meaning, context, truth, or official records. Editor must verify every claim.\n"
+      : "CLAIM TAGGING: model supplied no claim list. Treat all incident-specific statements as UNVERIFIED and review the full article.\n";
     let extra = "";
     if (Array.isArray(raw.suggested_headings)) extra += "Suggested headings: " + raw.suggested_headings.slice(0, 8).map(String).join(" | ") + "\n";
     if (raw.seo_title) extra += "SEO title: " + String(raw.seo_title).slice(0, 70) + "\n";
