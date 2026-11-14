@@ -98,3 +98,11 @@ test("hard validation failure (too-short body) retries instead of saving a draft
   assert.equal(r.body.status, "REQUEUED"); assert.equal(r.body.aiErrorCode, "AI_BAD_OUTPUT");
   assert.equal(q("SELECT COUNT(*) n FROM drafts").get().n, before);
 });
+
+test("legacy daily and local-AI handoff routes are disabled", async () => {
+  for (const path of ["/api/run/daily", "/api/local/claim", "/api/local/complete"]) {
+    const r = await call(path);
+    assert.equal(r.status, 410);
+    assert.equal(r.body.error, "LEGACY_ROUTE_DISABLED");
+  }
+});
