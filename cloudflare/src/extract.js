@@ -9,7 +9,7 @@ export function isSafeHttpsUrl(raw) {
     if (u.protocol !== "https:" || (u.port && u.port !== "443") || u.username || u.password) return false;
     const h = u.hostname.toLowerCase().replace(/\.$/, "");
     if (!h.includes(".") || h === "localhost" || /^\d{1,3}(\.\d{1,3}){3}$/.test(h) || h.includes(":") || h.startsWith("[")) return false;
-    if (/\.(local|internal|localhost|lan|home|corp|test|invalid|example)$/.test(h)) return false;
+    if (/\.(local|internal|localhost|lan|home|corp|test|invalid)$/.test(h)) return false;
     return true;
   } catch { return false; }
 }
