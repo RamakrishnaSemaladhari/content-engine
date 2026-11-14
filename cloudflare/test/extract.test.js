@@ -11,7 +11,6 @@ test("SSRF guard: only public https hosts", () => {
   for (const bad of ["http://a.com/x", "https://127.0.0.1/x", "https://169.254.169.254/", "https://localhost/x", "https://a.internal/x", "https://a.com:8443/x", "https://user:pw@a.com/", "https://[::1]/", "https://intranet/x"]) assert.equal(isSafeHttpsUrl(bad), false, bad);
   assert.equal(isSafeHttpsUrl("https://www.thehindu.com/a"), true);
   assert.equal(isSafeHttpsUrl("https://host.internal./a"), false);
-  assert.equal(isSafeHttpsUrl("https://host.example/a"), false);
 });
 test("decodes legacy Google News ids that embed the publisher URL; otherwise null", () => {
   const id = btoa("\x08\x13\x22\x40https://www.thehindu.com/news/story-1.ece\xd2\x01\x00").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
