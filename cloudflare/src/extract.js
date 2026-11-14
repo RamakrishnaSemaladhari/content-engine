@@ -1,6 +1,7 @@
 // Best-effort retrieval of the ORIGINAL article text for editorial evidence.
-// User-controlled URLs are restricted to HTTPS and Cloudflare global fetch is configured
-// to route only to public Internet destinations. Bodies are byte-capped while streaming.
+// User-controlled URLs are restricted to HTTPS and an explicit publisher host allowlist is applied.
+// Cloudflare global fetch uses strict-public routing; these checks are defense in depth, not a
+// complete independent DNS/IP firewall. Bodies are byte-capped while streaming.
 import {clean, decodeEntities} from "./feeds.js";
 
 export function isSafeHttpsUrl(raw) {
