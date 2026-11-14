@@ -342,9 +342,8 @@ export default {
     if (request.method==="POST" && url.pathname==="/api/run/draft") return runDraft(request,env);
     if (request.method==="GET" && url.pathname==="/api/shortlist") return listShortlist(url,env);
     { const m = url.pathname.match(/^\/api\/shortlist\/(\d+)\/(select|reject)$/); if (m && request.method==="POST") return setCandidate(env,Number(m[1]),m[2]); }
-    if (request.method==="POST" && url.pathname==="/api/run/daily") return runDaily(request,env);
-    if (request.method==="POST" && url.pathname==="/api/local/claim") return claimLocal(env);
-    if (request.method==="POST" && url.pathname==="/api/local/complete") return completeLocal(request,env);
+    if (request.method==="POST" && ["/api/run/daily","/api/local/claim","/api/local/complete"].includes(url.pathname))
+      return json({error:"LEGACY_ROUTE_DISABLED",message:"Use the two-day shortlist/draft workflow. Local AI handoff is disabled."},410);
     return json({error:"NOT_FOUND"},404);
   }
 };
