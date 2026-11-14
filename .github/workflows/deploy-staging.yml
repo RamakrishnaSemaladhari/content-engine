@@ -59,6 +59,11 @@ jobs:
           (cd cloudflare && npm test)
           (cd insights && npm test)
           node --check preview/worker.js
+      - name: Wrangler bundle and configuration dry-runs
+        run: |
+          (cd cloudflare && npx --yes $WRANGLER deploy --dry-run)
+          (cd insights && npx --yes $WRANGLER deploy --dry-run)
+          (cd preview && npx --yes $WRANGLER deploy --dry-run)
       - name: Secrets present (names only)
         env: { T: "${{ secrets.CLOUDFLARE_API_TOKEN }}", A: "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" }
         run: |
