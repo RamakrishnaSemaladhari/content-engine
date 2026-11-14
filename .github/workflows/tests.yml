@@ -15,3 +15,8 @@ jobs:
           node-version: "22"
       - run: cd insights && npm test
       - run: if [ -f cloudflare/package.json ]; then cd cloudflare && npm test; fi
+      - name: Wrangler bundle and configuration dry-runs
+        run: |
+          (cd cloudflare && npx --yes wrangler@4 deploy --dry-run)
+          (cd insights && npx --yes wrangler@4 deploy --dry-run)
+          (cd preview && npx --yes wrangler@4 deploy --dry-run)
