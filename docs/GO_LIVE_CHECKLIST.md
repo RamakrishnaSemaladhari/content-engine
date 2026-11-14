@@ -21,7 +21,7 @@ NOT automated: legal accuracy; official records or court orders; independent cor
 
 ## One-time setup (you; secret values never go in chat, code or logs)
 1. Create a NEW scoped Cloudflare API token: Workers Scripts:Edit and D1:Edit, restricted to your account. Do not reuse a token that was ever pasted in chat. Revoke those.
-2. GitHub repo > Settings > Secrets and variables > Actions, add: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` (`342d17188e7e6e396f3ecd9470982f74`). Existing `ENGINE_API_URL` / `ENGINE_API_TOKEN` stay as they are (same token as the engine Worker secret; if unsure they match, the smoke test reports "token REJECTED").
+2. GitHub repo > Settings > Secrets and variables > Actions, add: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` (use the value shown in your Cloudflare account settings; never commit it). Existing `ENGINE_API_URL` / `ENGINE_API_TOKEN` stay as they are (same token as the engine Worker secret; if unsure they match, the smoke test reports "token REJECTED").
 3. Optional: Settings > Environments > `staging` > add yourself as required reviewer for a deploy approval step.
 4. Merge the release PR into `main`.
 
