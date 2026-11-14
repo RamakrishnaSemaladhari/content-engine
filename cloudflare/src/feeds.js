@@ -103,7 +103,8 @@ export async function fetchFeed(url, cfg, fetchImpl = fetch) {
       const read = await readFeedBodyLimited(res, cfg.maxFeedBytes);
       diag.bytes = read.bytes;
       if (read.tooLarge) { diag.error = "FEED_TOO_LARGE"; break; }
-      const items = parseFeed(read.text);
+      const body = read.text;
+      const items = parseFeed(body);
       diag.items = items.length;
       if (!items.length) { diag.error = /<html/i.test(body.slice(0, 500)) ? "HTML_NOT_FEED" : "NO_ITEMS"; break; }
       diag.ok = true; diag.error = null; diag.ms = Date.now() - t0;
