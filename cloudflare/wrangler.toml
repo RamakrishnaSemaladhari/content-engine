@@ -1,0 +1,13 @@
+# Engine Worker (staging pipeline). IDs below are not secrets. Secrets (ENGINE_API_TOKEN) live only in Cloudflare and are preserved by deploys.
+name = "fivecheckmate-content-engine"
+main = "src/index.js"
+compatibility_date = "2026-10-18"
+workers_dev = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "fivecheckmate-content-engine"
+database_id = "050c8bbf-172e-4369-8058-40d84052d2b2"
+
+[ai]
+binding = "AI"

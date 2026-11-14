@@ -18,5 +18,9 @@
     "preferEstablishedPublishers": true,
     "neverTreatAllegationsAsProvenFacts": true,
     "requireHumanApproval": true
-  }
+  },
+  "ceid": "IN:en",
+  "fetchTimeoutMs": 8000,
+  "maxFeedBytes": 1500000,
+  "retries": 1
 }

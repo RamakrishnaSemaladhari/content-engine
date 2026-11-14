@@ -1,0 +1,6 @@
+CREATE TABLE users(id TEXT PRIMARY KEY,username TEXT UNIQUE COLLATE NOCASE NOT NULL,display_name TEXT NOT NULL,password_hash TEXT NOT NULL,role TEXT NOT NULL CHECK(role IN('admin','editor','reviewer','publisher')),disabled INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE articles(id TEXT PRIMARY KEY,title TEXT NOT NULL,slug TEXT UNIQUE NOT NULL,category TEXT NOT NULL,summary TEXT NOT NULL,body_markdown TEXT NOT NULL,meta_description TEXT NOT NULL,source_links_json TEXT NOT NULL DEFAULT '[]',status TEXT NOT NULL CHECK(status IN('draft','review','approved','published','rejected')),created_by TEXT NOT NULL REFERENCES users(id),updated_by TEXT NOT NULL REFERENCES users(id),approved_by TEXT,published_by TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,approved_at TEXT,published_at TEXT);
+CREATE INDEX idx_articles_status ON articles(status,updated_at DESC);
+CREATE TABLE audit_events(id INTEGER PRIMARY KEY AUTOINCREMENT,actor_user_id TEXT,article_id TEXT,event_type TEXT NOT NULL,detail TEXT DEFAULT '',created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE login_attempts(id INTEGER PRIMARY KEY AUTOINCREMENT,ip_hash TEXT NOT NULL,attempted_at INTEGER NOT NULL);
+CREATE INDEX idx_login_attempts ON login_attempts(ip_hash,attempted_at);
