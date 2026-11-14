@@ -1,6 +1,7 @@
 name = "fivecheckmate-insights-staging-v2"
 main = "src/worker.js"
 compatibility_date = "2026-10-18"
+workers_dev = true
 [[d1_databases]]
 binding = "DB"
 database_name = "fivecheckmate-insights-staging"

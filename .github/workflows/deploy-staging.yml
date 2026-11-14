@@ -1,0 +1,98 @@
+name: Deploy Staging
+# Manual, guarded deploy of the STAGING stack only:
+#   fivecheckmate-content-engine, fivecheckmate-insights-staging-v2, fivecheckmate-blog-preview.
+# Never touches Workers "fivecheckmate" / "5checkmate", production routes or DNS. Secrets already in Cloudflare are preserved.
+# One-time: add repo secrets CLOUDFLARE_API_TOKEN (scoped: Workers Scripts:Edit + D1:Edit) and CLOUDFLARE_ACCOUNT_ID.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type DEPLOY-STAGING to proceed'
+        required: true
+        type: string
+      target:
+        description: "What to deploy"
+        type: choice
+        default: all
+        options: [all, engine, insights, ui]
+      apply_engine_migration:
+        description: "Apply additive engine D1 migration 0002 (idempotent CREATE IF NOT EXISTS)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fivecheckmate-deploy-staging
+  cancel-in-progress: false
+
+env:
+  ENGINE_URL: https://fivecheckmate-content-engine.kingramakrishna.workers.dev
+  INSIGHTS_URL: https://fivecheckmate-insights-staging-v2.kingramakrishna.workers.dev
+  UI_URL: https://fivecheckmate-blog-preview.kingramakrishna.workers.dev
+  WRANGLER: wrangler@4
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Confirmation phrase
+        run: |
+          [ "${{ inputs.confirm }}" = "DEPLOY-STAGING" ] || { echo "::error::Confirmation phrase must be exactly DEPLOY-STAGING."; exit 1; }
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: Production guard (config must target staging resources only)
+        run: |
+          set -e
+          for f in cloudflare/wrangler.toml insights/wrangler.toml preview/wrangler.toml; do
+            n=$(grep -E '^name *=' "$f" | head -1 | sed 's/.*"\(.*\)".*/\1/')
+            case "$n" in fivecheckmate|5checkmate) echo "::error::$f targets production Worker '$n'. Refusing."; exit 1;; esac
+            echo "$f -> $n"
+          done
+          ! grep -Eq 'routes? *=|custom_domain|pattern *=' cloudflare/wrangler.toml insights/wrangler.toml preview/wrangler.toml || { echo "::error::Routes/custom domains are not allowed in staging configs."; exit 1; }
+      - name: Tests
+        run: |
+          (cd cloudflare && npm test)
+          (cd insights && npm test)
+          node --check preview/worker.js
+      - name: Secrets present (names only)
+        env: { T: "${{ secrets.CLOUDFLARE_API_TOKEN }}", A: "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" }
+        run: |
+          [ -n "$T" ] || { echo "::error::Add repo secret CLOUDFLARE_API_TOKEN."; exit 1; }
+          [ -n "$A" ] || { echo "::error::Add repo secret CLOUDFLARE_ACCOUNT_ID."; exit 1; }
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    environment: staging        # optional: add required reviewers to this GitHub environment
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: Engine D1 migration 0002 (additive)
+        if: ${{ inputs.apply_engine_migration && (inputs.target == 'all' || inputs.target == 'engine') }}
+        working-directory: cloudflare
+        run: npx --yes $WRANGLER d1 execute fivecheckmate-content-engine --remote --file=migrations/0002_two_day_queue.sql
+      - name: Deploy engine Worker
+        if: ${{ inputs.target == 'all' || inputs.target == 'engine' }}
+        working-directory: cloudflare
+        run: npx --yes $WRANGLER deploy
+      - name: Deploy Insights API Worker
+        if: ${{ inputs.target == 'all' || inputs.target == 'insights' }}
+        working-directory: insights
+        run: npx --yes $WRANGLER deploy
+      - name: Deploy staging UI Worker
+        if: ${{ inputs.target == 'all' || inputs.target == 'ui' }}
+        working-directory: preview
+        run: npx --yes $WRANGLER deploy
+      - name: Smoke test
+        run: bash scripts/smoke-staging.sh

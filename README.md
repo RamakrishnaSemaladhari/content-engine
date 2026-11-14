@@ -35,5 +35,5 @@ PR #1 contains the two-day queue implementation and updated deployment guide. Th
 ## Staging editorial portal
 
 - Staging visitor blog: https://fivecheckmate-blog-preview.kingramakrishna.workers.dev
-- Editorial API/backend: https://fivecheckmate-insights.kingramakrishna.workers.dev
+- Editorial API/backend: https://fivecheckmate-insights-staging-v2.kingramakrishna.workers.dev (the older `fivecheckmate-insights` Worker is not used by the staging UI)
 - The portal supports staff editorial actions and imports research drafts from the engine. Publishing remains a staff-controlled action; only published articles should be visible publicly.
