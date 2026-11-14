@@ -74,3 +74,20 @@ test("RSS feed declared oversized Content-Length is rejected before reading", as
   assert.equal(result.diag.error, "FEED_TOO_LARGE");
   assert.equal(result.diag.bytes, 64);
 });
+
+test("source retrieval allowlist blocks unknown hosts and revalidates redirect targets", async () => {
+  let calls = 0;
+  const blocked = await fetchSourceExtract("https://evil.example/story", async () => {
+    calls++;
+    return html(page);
+  }, {allowedHosts: ["thehindu.com"]});
+  assert.equal(blocked.reason, "HOST_NOT_ALLOWLISTED");
+  assert.equal(calls, 0);
+
+  const redirected = await fetchSourceExtract("https://www.thehindu.com/story", async () => {
+    calls++;
+    return new Response(null, {status: 302, headers: {location: "https://evil.example/redirect"}});
+  }, {allowedHosts: ["thehindu.com"]});
+  assert.equal(redirected.reason, "HOST_NOT_ALLOWLISTED");
+  assert.equal(calls, 1);
+});
