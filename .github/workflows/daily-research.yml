@@ -1,60 +1,105 @@
-name: Daily Research Queue
+name: Editorial Queue
+# Two-day pipeline. Nothing here approves or publishes. Drafts land as UNPUBLISHED in the engine DB.
+#   Day 1  phase=shortlist : RSS discovery, dedupe, deterministic scoring. NO AI. Shortlist is printed in the run summary.
+#   Review phase=select/reject with ids (comma-separated numbers from the summary).
+#   Day 2  phase=draft     : AI writes ONE article per request, only for SELECTED stories (max 3 per run).
+# Schedules stay commented out until a full manual cycle passes in staging.
 
 on:
   workflow_dispatch:
+    inputs:
+      phase:
+        description: "What to run"
+        type: choice
+        default: shortlist
+        options: [shortlist, list, select, reject, draft, diagnostics]
+      ids:
+        description: "Candidate ids for select/reject, e.g. 3,7"
+        type: string
+        required: false
+  # schedule:
+  #   - cron: "30 1 * * *"   # 07:00 IST  Day 1 shortlist
+  #   - cron: "30 2 * * *"   # 08:00 IST  Day 2 drafts for stories you selected
 
 permissions:
   contents: read
 
 concurrency:
-  group: fivecheckmate-daily-research
+  group: fivecheckmate-editorial-queue
   cancel-in-progress: false
 
 jobs:
-  enqueue:
+  run:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
+    env:
+      ENGINE_API_URL: ${{ secrets.ENGINE_API_URL }}
+      ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
+      PHASE: ${{ inputs.phase || (github.event.schedule == '30 1 * * *' && 'shortlist') || 'draft' }}
+      IDS: ${{ inputs.ids }}
     steps:
-      - name: Validate configuration
-        env:
-          ENGINE_API_URL: ${{ secrets.ENGINE_API_URL }}
-          ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
+      - name: Validate configuration (names only; values never printed)
         run: |
           set -euo pipefail
-          missing=0
-          if [ -z "${ENGINE_API_URL}" ]; then
-            echo "::error::ENGINE_API_URL is missing or unavailable to this workflow."
-            missing=1
-          fi
-          if [ -z "${ENGINE_API_TOKEN}" ]; then
-            echo "::error::ENGINE_API_TOKEN is missing or unavailable to this workflow."
-            missing=1
-          fi
-          if [ "$missing" -ne 0 ]; then
-            echo "Check Settings > Secrets and variables > Actions > Repository secrets. Names must match exactly. No network request was made."
-            exit 1
-          fi
-          case "$ENGINE_API_URL" in
-            https://*) ;;
-            *) echo "::error::ENGINE_API_URL must use HTTPS"; exit 1 ;;
+          [ -n "${ENGINE_API_URL:-}" ]   || { echo "::error::Secret ENGINE_API_URL is missing."; exit 1; }
+          [ -n "${ENGINE_API_TOKEN:-}" ] || { echo "::error::Secret ENGINE_API_TOKEN is missing."; exit 1; }
+          case "$ENGINE_API_URL" in https://*) ;; *) echo "::error::ENGINE_API_URL must be https://"; exit 1;; esac
+          echo "ENGINE_API_URL=${ENGINE_API_URL%/}" >> "$GITHUB_ENV"
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "${ENGINE_API_URL%/}/api/health" || echo 000)
+          [ "$code" = 200 ] || { echo "::error::Worker health returned HTTP $code."; exit 1; }
+      - name: Run phase
+        run: |
+          set -uo pipefail
+          call() {  # call METHOD PATH -> sets $code, writes resp.json. Retries 429?/5xx/network only for non-draft phases.
+            local m="$1" p="$2" tries="${3:-3}" a
+            for a in $(seq 1 "$tries"); do
+              code=$(curl -sS -o resp.json -w '%{http_code}' --max-time 100 -X "$m" \
+                -H @<(printf 'Authorization: Bearer %s\n' "$ENGINE_API_TOKEN") \
+                -H 'Content-Type: application/json' --data '{}' "$ENGINE_API_URL$p" || echo 000)
+              case "$code" in
+                2*|429) return 0 ;;
+                401) echo "::error::HTTP 401: ENGINE_API_TOKEN (GitHub) does not match the Worker secret. Not retrying."; exit 1 ;;
+                403|404) echo "::error::HTTP $code on $p (blocked, or Worker not updated to the queue version). Not retrying."; exit 1 ;;
+                5*|000) echo "HTTP $code on attempt $a"; [ "$a" -lt "$tries" ] && sleep $((a*20)) ;;
+                *) echo "::error::Unexpected HTTP $code"; exit 1 ;;
+              esac
+            done
+            return 1
+          }
+          show_list() {
+            call GET /api/shortlist 2 || return 1
+            {
+              echo "### Shortlist (id | status | score | topic | publisher | title)"
+              jq -r '.candidates[] | "- **#\(.id)** `\(.status)` score \(.total_score) · \(.topic) · \(.publisher) — [\(.title)](\(.url))  \n  _\(.reason)_\(if .last_error_code then "  \n  last error: \(.last_error_code)" else "" end)"' resp.json
+              echo; echo "To choose: run this workflow with phase=select and ids=<numbers>. Nothing is written until you do."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "Shortlist written to the run summary ($(jq '.candidates|length' resp.json) items)."
+          }
+          case "$PHASE" in
+            diagnostics) call GET /api/diagnostics/rss && jq -r '"feeds ok: \(.summary.feedsOk)/\(.summary.feedsTotal), usable: \(.summary.kept)"' resp.json ;;
+            shortlist)
+              call POST /api/run/shortlist || { echo "::error::Worker still failing after retries."; exit 1; }
+              [ "$code" = 429 ] && { echo "::warning::Rate limited."; exit 1; }
+              jq -r '"status=\(.status) added=\(.added // 0) dupUrl=\(.duplicatesByUrl // 0) dupTitle=\(.duplicatesByTitle // 0) ai=\(.aiUsed // false)"' resp.json
+              [ "$(jq -r '.status' resp.json)" = "NO_USABLE_SOURCES" ] && echo "::notice::Feeds healthy; no relevant recent story today."
+              [ "$code" -ge 300 ] && { echo "::error::Shortlist failed: $(jq -r '.status // .error' resp.json)"; exit 1; }
+              show_list ;;
+            list) show_list ;;
+            select|reject)
+              [ -n "${IDS:-}" ] || { echo "::error::Provide ids (e.g. 3,7)."; exit 1; }
+              for id in $(echo "$IDS" | tr ',' ' '); do
+                case "$id" in ''|*[!0-9]*) echo "::error::Invalid id '$id'"; exit 1;; esac
+                call POST "/api/shortlist/$id/$PHASE" 1 || exit 1
+                echo "#$id -> HTTP $code $(jq -r '.status // .error' resp.json)"
+              done; show_list ;;
+            draft)
+              for n in 1 2 3; do   # one article per request, at most 3 per run
+                call POST /api/run/draft 2 || { echo "::error::Worker failing."; exit 1; }
+                st=$(jq -r '.status // .error' resp.json); echo "request $n: HTTP $code $st $(jq -r '.aiErrorCode // empty' resp.json)"
+                if [ "$(jq -r '.stop // false' resp.json)" = "true" ]; then echo "::warning::AI quota exhausted. Selected stories stay queued; rerun later. No paid fallback is used."; break; fi
+                [ "$st" = "NOTHING_SELECTED" ] && { echo "::notice::No selected stories waiting."; break; }
+                [ "$(jq -r '.remaining // 0' resp.json)" = "0" ] && break
+              done
+              echo "Drafts are UNPUBLISHED. Import and review them in the Insights admin." ;;
+            *) echo "::error::Unknown phase"; exit 1 ;;
           esac
-      - name: Create or resume daily job
-        env:
-          ENGINE_API_URL: ${{ secrets.ENGINE_API_URL }}
-          ENGINE_API_TOKEN: ${{ secrets.ENGINE_API_TOKEN }}
-        run: |
-          set -euo pipefail
-          code="$(curl --silent --show-error --output /tmp/response.json --write-out '%{http_code}' \
-            --max-time 60 --request POST \
-            --header "Authorization: Bearer $ENGINE_API_TOKEN" \
-            --header "Content-Type: application/json" \
-            --data '{"mode":"daily","maxCandidates":40}' \
-            "$ENGINE_API_URL/api/run/daily")"
-          if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
-            echo "::error::Worker returned HTTP $code."
-            echo "Worker response body (may contain diagnostic details):"
-            cat /tmp/response.json
-            exit 1
-          fi
-          echo "Daily job accepted. Response:"
-          cat /tmp/response.json
