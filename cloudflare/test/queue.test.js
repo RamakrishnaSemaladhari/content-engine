@@ -20,7 +20,7 @@ const realFetch = globalThis.fetch;
 globalThis.fetch = async (u) => {
   u = String(u);
   if (u.includes("news.google.com/rss/search")) return new Response(rss);
-  if (/^https:\/\/www\.(thehindu|deccanchronicle|telanganatoday)\\.com\//.test(u)) return articleMode === "ok" ? new Response(ARTICLE, {headers: {"content-type": "text/html"}}) : new Response("blocked", {status: 403});
+  if (/thehindu\\.com|deccanchronicle\\.com|telanganatoday\\.com/.test(u)) return articleMode === "ok" ? new Response(ARTICLE, {headers: {"content-type": "text/html"}}) : new Response("blocked", {status: 403});
   return new Response("", {status: 404});
 };
 test.after(() => { globalThis.fetch = realFetch; });
