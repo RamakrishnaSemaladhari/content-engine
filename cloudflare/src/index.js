@@ -294,8 +294,8 @@ async function runDraft(req, env) {
     const modelClaims = Array.isArray(raw.claims) ? raw.claims : [];
     const claims = modelClaims.slice(0, 30).map(x => "- [" + (x && x.basis === "source_text" && evidence === "SOURCE_TEXT" ? "in source text" : "UNVERIFIED") + "] " + String(x && x.claim || x).slice(0, 220));
     const claimAudit = claims.length
-      ? "CLAIM TAGGING: model-supplied list; it is not an exhaustive extraction of every factual statement in the article. Each item still requires editor verification.\\n"
-      : "CLAIM TAGGING: model supplied no claim list. Treat all incident-specific statements as UNVERIFIED and review the full article.\\n";
+      ? "CLAIM TAGGING: model-supplied list; it is not an exhaustive extraction of every factual statement in the article. Each item still requires editor verification.\n"
+      : "CLAIM TAGGING: model supplied no claim list. Treat all incident-specific statements as UNVERIFIED and review the full article.\n";
     let extra = "";
     if (Array.isArray(raw.suggested_headings)) extra += "Suggested headings: " + raw.suggested_headings.slice(0, 8).map(String).join(" | ") + "\n";
     if (raw.seo_title) extra += "SEO title: " + String(raw.seo_title).slice(0, 70) + "\n";
