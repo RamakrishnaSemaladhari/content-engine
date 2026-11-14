@@ -66,11 +66,18 @@ async function readBodyLimited(response, maxBytes) {
 export async function fetchSourceExtract(link, fetchImpl = fetch, opts = {}) {
   const timeoutMs = Math.max(100, Math.min(30000, Number(opts.timeoutMs) || 8000));
   const maxBytes = Math.max(1024, Math.min(700000, Number(opts.maxBytes) || 700000));
+  const allowedHosts = Array.isArray(opts.allowedHosts) ? opts.allowedHosts.map(x => String(x).toLowerCase().replace(/^www\\./, "")) : null;
+  const hostAllowed = value => {
+    if (!allowedHosts) return true;
+    const h = safeHost(value).replace(/^www\\./, "");
+    return allowedHosts.some(d => h === d || h.endsWith("." + d)) || h.endsWith(".gov.in") || h.endsWith(".nic.in");
+  };
   let url = link;
   const g = /(^|\.)news\.google\.com$/.test(safeHost(link)) ? decodeGoogleNewsUrl(link) : null;
   if (g) url = g;
   for (let hop = 0; hop < 5; hop++) {
     if (!isSafeHttpsUrl(url)) return {status: "UNAVAILABLE", reason: hop ? "REDIRECT_BLOCKED" : "URL_NOT_ALLOWED", finalUrl: null, text: "", chars: 0};
+    if (!hostAllowed(url)) return {status: "UNAVAILABLE", reason: "HOST_NOT_ALLOWLISTED", finalUrl: null, text: "", chars: 0};
     if (/(^|\.)news\.google\.com$/.test(safeHost(url)) && hop > 0) return {status: "UNAVAILABLE", reason: "GOOGLE_NEWS_REDIRECT_ONLY", finalUrl: null, text: "", chars: 0};
     const ac = new AbortController(), t = setTimeout(() => ac.abort(), timeoutMs);
     try {
