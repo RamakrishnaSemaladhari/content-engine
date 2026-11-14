@@ -1,11 +1,11 @@
 # Content Engine v0.3.0 — safe staging deployment
 
-This document describes the **two-day editorial queue** in PR #1. The workflow uses the existing Cloudflare Workers AI binding only. It does not use local Ollama, Gemini, Copilot, a paid API, or a paid fallback.
+This document describes the **two-day editorial queue** in the release branch review. The workflow uses the existing Cloudflare Workers AI binding only. It does not use local Ollama, Gemini, Copilot, a paid API, or a paid fallback.
 
 ## Safety boundaries
 
 - Do not change, deploy, or edit the production website Workers `fivecheckmate` or `5checkmate`, their routes, or production DNS.
-- Deploy only the `fivecheckmate-content-engine` Worker after reviewing and merging PR #1.
+- Deploy only the `fivecheckmate-content-engine` Worker after reviewing and merging the staging release PR.
 - Keep the GitHub Actions workflow manual-only until the full staging cycle has passed. The schedule is intentionally commented out.
 - Shortlisting must not call AI. Drafting only processes stories explicitly marked SELECTED.
 - Every generated draft must remain `UNPUBLISHED`; publishing is a separate human action.
@@ -18,7 +18,6 @@ This document describes the **two-day editorial queue** in PR #1. The workflow u
 - Worker base URL: https://fivecheckmate-content-engine.kingramakrishna.workers.dev
 - Health endpoint: https://fivecheckmate-content-engine.kingramakrishna.workers.dev/api/health
 - D1 database: `fivecheckmate-content-engine`
-- D1 database ID: `050c8bbf-172e-4369-8058-40d84052d2b2`
 - Required existing bindings: D1 as `DB`, Workers AI as `AI`, Worker secret `ENGINE_API_TOKEN`
 
 The health URL is documented here but must be checked live as part of the deployment; this document does not claim that a current HTTP check has passed.
@@ -53,7 +52,7 @@ npm ci
 npm test
 ```
 
-The branch reports 17 tests, but rerun them on the reviewed commit and require a successful exit before deployment.
+GitHub Actions must pass the full test suite on the reviewed commit; a green PR check is required before deployment.
 
 After reviewing the diff and merging PR #1, deploy **only** the engine Worker using the project's reviewed Wrangler configuration:
 
