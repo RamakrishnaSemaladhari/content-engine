@@ -106,3 +106,13 @@ The workflow discovers candidate headlines/snippets and URLs; it does not indepe
 - Free Workers AI quota exhaustion: stop and keep work queued; no provider switching or paid fallback.
 - Other AI failures: retry behavior is bounded; inspect the recorded safe error before reselecting failed candidates.
 - Generated drafts: always `UNPUBLISHED`.
+
+
+## Additional staging safeguards
+
+- RSS and Atom responses are read with a streaming byte ceiling; declared oversized responses are rejected early. A slow or oversized feed cannot be fully buffered before the limit is checked.
+- Original article retrieval is limited to HTTPS and the configured publisher host allowlist. Redirect targets are revalidated against the same allowlist. Unsupported publishers remain `HEADLINE_ONLY`; do not weaken the allowlist just to increase retrieval coverage.
+- The Cloudflare `global_fetch_strictly_public` compatibility flag is enabled for the engine. It changes global fetch routing to public-Internet semantics; it is not a substitute for application-level destination checks.
+- Model-supplied claim lists are explicitly non-exhaustive. The label `exact phrase in retrieved text; not fact-checked` means only that a normalized phrase appears in retrieved text. It does not establish meaning, context, or truth. Every claim still requires editor verification.
+- Workers Logs are enabled for the staging engine, Insights API and preview UI. Query strings are redacted; no credentials should be written to logs.
+- Pull-request CI and the manual deployment workflow run Wrangler dry-runs for all three Workers before deployment.
