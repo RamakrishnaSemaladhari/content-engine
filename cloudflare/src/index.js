@@ -288,16 +288,22 @@ async function runDraft(req, env) {
     const evidence = ex.status === "OK" ? "SOURCE_TEXT" : "HEADLINE_ONLY";
     const check = validateDraft(result, {allowedUrls: [c.url, ex.finalUrl || c.url], evidence});
     if (check.hard.length) throw new Error("INVALID_MODEL_JSON: " + check.hard.join(","));
-    let raw = {}; try { raw = JSON.parse(String(ai.response).slice(String(ai.response).indexOf("{"), String(ai.response).lastIndexOf("}") + 1)); } catch {}
-    const claims = (Array.isArray(raw.claims) ? raw.claims : []).slice(0, 12).map(x => "- [" + (x && x.basis === "source_text" && evidence === "SOURCE_TEXT" ? "in source text" : "UNVERIFIED") + "] " + String(x && x.claim || x).slice(0, 220));
+    let raw = {};
+    const rawText = String(ai.response || ai.output_text || "");
+    try { raw = JSON.parse(rawText.slice(rawText.indexOf("{"), rawText.lastIndexOf("}") + 1)); } catch {}
+    const modelClaims = Array.isArray(raw.claims) ? raw.claims : [];
+    const claims = modelClaims.slice(0, 30).map(x => "- [" + (x && x.basis === "source_text" && evidence === "SOURCE_TEXT" ? "in source text" : "UNVERIFIED") + "] " + String(x && x.claim || x).slice(0, 220));
+    const claimAudit = claims.length
+      ? "CLAIM TAGGING: model-supplied list; it is not an exhaustive extraction of every factual statement in the article. Each item still requires editor verification.\\n"
+      : "CLAIM TAGGING: model supplied no claim list. Treat all incident-specific statements as UNVERIFIED and review the full article.\\n";
     let extra = "";
     if (Array.isArray(raw.suggested_headings)) extra += "Suggested headings: " + raw.suggested_headings.slice(0, 8).map(String).join(" | ") + "\n";
     if (raw.seo_title) extra += "SEO title: " + String(raw.seo_title).slice(0, 70) + "\n";
     const head = "EVIDENCE: " + (evidence === "SOURCE_TEXT" ? "original article text retrieved from " + ex.finalUrl + (ex.published ? " (page date " + ex.published + ")" : "") + " - claims below still need an editor's check; official records / court orders were NOT checked"
       : "HEADLINE_ONLY (" + ex.reason + ") - the original report could not be retrieved. Do NOT publish until an editor has read the original article") + "\n";
     const warn = check.warnings.length ? "AUTOMATED CHECKS: " + check.warnings.join("; ") + "\n" : "";
-    result.verification_notes = (head + warn + extra + "Source: " + c.publisher + " (listed by heuristic, not verified) - " + c.url + (claims.length ? "\nCLAIMS TO VERIFY:\n" + claims.join("\n") : "") + "\nModel notes: " + result.verification_notes).slice(0, 4000);
-    if (evidence !== "SOURCE_TEXT" || check.warnings.length) result.status = "NEEDS_REVIEW";
+    result.verification_notes = (head + warn + claimAudit + extra + "Source: " + c.publisher + " (listed by heuristic, not verified) - " + c.url + (claims.length ? "\nCLAIMS TO VERIFY:\n" + claims.join("\n") : "") + "\nModel notes: " + result.verification_notes).slice(0, 4000);
+    if (evidence !== "SOURCE_TEXT" || check.warnings.length || claims.length === 0) result.status = "NEEDS_REVIEW";
     await saveResult(db, jobId, result, [{url: c.url, publisher: c.publisher, title: c.title}], "cloudflare-workers-ai");
     await db.prepare("UPDATE candidates SET status='DRAFTED',job_id=?,lease_until=NULL,last_error_code=NULL,last_error_safe=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(jobId, c.id).run();
     const rem = await db.prepare("SELECT COUNT(*) n FROM candidates WHERE status='SELECTED' AND attempts<3").first();
