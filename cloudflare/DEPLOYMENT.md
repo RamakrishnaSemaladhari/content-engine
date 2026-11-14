@@ -1,11 +1,11 @@
 # Content Engine v0.3.0 — safe staging deployment
 
-This document describes the **two-day editorial queue** in PR #1. The workflow uses the existing Cloudflare Workers AI binding only. It does not use local Ollama, Gemini, Copilot, a paid API, or a paid fallback.
+This document describes the **two-day editorial queue** in the release branch review. The workflow uses the existing Cloudflare Workers AI binding only. It does not use local Ollama, Gemini, Copilot, a paid API, or a paid fallback.
 
 ## Safety boundaries
 
 - Do not change, deploy, or edit the production website Workers `fivecheckmate` or `5checkmate`, their routes, or production DNS.
-- Deploy only the `fivecheckmate-content-engine` Worker after reviewing and merging PR #1.
+- Deploy only the `fivecheckmate-content-engine` Worker after reviewing and merging the staging release PR.
 - Keep the GitHub Actions workflow manual-only until the full staging cycle has passed. The schedule is intentionally commented out.
 - Shortlisting must not call AI. Drafting only processes stories explicitly marked SELECTED.
 - Every generated draft must remain `UNPUBLISHED`; publishing is a separate human action.
@@ -18,7 +18,6 @@ This document describes the **two-day editorial queue** in PR #1. The workflow u
 - Worker base URL: https://fivecheckmate-content-engine.kingramakrishna.workers.dev
 - Health endpoint: https://fivecheckmate-content-engine.kingramakrishna.workers.dev/api/health
 - D1 database: `fivecheckmate-content-engine`
-- D1 database ID: `050c8bbf-172e-4369-8058-40d84052d2b2`
 - Required existing bindings: D1 as `DB`, Workers AI as `AI`, Worker secret `ENGINE_API_TOKEN`
 
 The health URL is documented here but must be checked live as part of the deployment; this document does not claim that a current HTTP check has passed.
@@ -53,7 +52,7 @@ npm ci
 npm test
 ```
 
-The branch reports 17 tests, but rerun them on the reviewed commit and require a successful exit before deployment.
+GitHub Actions must pass the full test suite on the reviewed commit; a green PR check is required before deployment.
 
 After reviewing the diff and merging PR #1, deploy **only** the engine Worker using the project's reviewed Wrangler configuration:
 
@@ -107,3 +106,13 @@ The workflow discovers candidate headlines/snippets and URLs; it does not indepe
 - Free Workers AI quota exhaustion: stop and keep work queued; no provider switching or paid fallback.
 - Other AI failures: retry behavior is bounded; inspect the recorded safe error before reselecting failed candidates.
 - Generated drafts: always `UNPUBLISHED`.
+
+
+## Additional staging safeguards
+
+- RSS and Atom responses are read with a streaming byte ceiling; declared oversized responses are rejected early. A slow or oversized feed cannot be fully buffered before the limit is checked.
+- Original article retrieval is limited to HTTPS and the configured publisher host allowlist. Redirect targets are revalidated against the same allowlist. Unsupported publishers remain `HEADLINE_ONLY`; do not weaken the allowlist just to increase retrieval coverage.
+- The Cloudflare `global_fetch_strictly_public` compatibility flag is enabled for the engine. It changes global fetch routing to public-Internet semantics; it is not a substitute for application-level destination checks.
+- Model-supplied claim lists are explicitly non-exhaustive. The label `exact phrase in retrieved text; not fact-checked` means only that a normalized phrase appears in retrieved text. It does not establish meaning, context, or truth. Every claim still requires editor verification.
+- Workers Logs are enabled for the staging engine, Insights API and preview UI. Query strings are redacted; no credentials should be written to logs.
+- Pull-request CI and the manual deployment workflow run Wrangler dry-runs for all three Workers before deployment.

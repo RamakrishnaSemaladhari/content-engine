@@ -13,3 +13,14 @@ migrations_dir = "migrations"
 binding = "CONTENT_DB"
 database_name = "fivecheckmate-content-engine"
 database_id = "050c8bbf-172e-4369-8058-40d84052d2b2"
+
+# Staging diagnostics: persist invocation logs; redact query strings to avoid leaking URL parameters.
+[observability]
+enabled = true
+head_sampling_rate = 1
+redact_query_string = true
+
+[observability.logs]
+enabled = true
+invocation_logs = true
+head_sampling_rate = 1

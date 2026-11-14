@@ -14,5 +14,6 @@ export const CONFIG = {
   minimumDraftScore: 55,
   fetchTimeoutMs: 8000,
   maxFeedBytes: 1500000,
-  retries: 1
+  retries: 1,
+  allowUndated: false
 };
