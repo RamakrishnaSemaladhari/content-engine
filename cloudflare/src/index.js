@@ -1,6 +1,7 @@
 import {CONFIG} from "./config.js";
 import {clean, host, canonicalize, buildFeedUrl, fetchFeed} from "./feeds.js";
 import {fetchSourceExtract, validateDraft} from "./extract.js";
+const SOURCE_FETCH_HOSTS = ["thehindu.com","indianexpress.com","timesofindia.indiatimes.com","deccanchronicle.com","telanganatoday.com","newindianexpress.com","hindustantimes.com","ndtv.com","aninews.in","siasat.com","newsminute.com","eenadu.net","sakshi.com","barandbench.com","livelaw.in","thewire.in","indiatoday.in","deccanherald.com"];
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {status, headers: {"content-type":"application/json; charset=utf-8","cache-control":"no-store"}});
 }
@@ -276,7 +277,7 @@ async function runDraft(req, env) {
   const claim = await db.prepare("UPDATE candidates SET status='DRAFTING',lease_until=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND (status='SELECTED' OR (status='DRAFTING' AND lease_until<?))").bind(new Date(Date.now() + 300000).toISOString(), c.id, nowIso).run();
   if (!claim.meta || !claim.meta.changes) return json({ok: true, status: "BUSY"}, 202);
   const jobId = "fc-c" + String(c.id).padStart(5, "0") + "-" + nowIso.slice(0, 10).replace(/-/g, "");
-  const ex = await fetchSourceExtract(c.url);
+  const ex = await fetchSourceExtract(c.url, fetch, {allowedHosts: SOURCE_FETCH_HOSTS});
   const task = storyTask(c, ex);
   await db.prepare("INSERT INTO jobs(id,run_date,status,stage,lease_owner,lease_until) VALUES(?,?, 'DRAFT_PENDING','cloud_ai','cloudflare-ai',?) ON CONFLICT(id) DO UPDATE SET status='DRAFT_PENDING',stage='cloud_ai',updated_at=CURRENT_TIMESTAMP").bind(jobId, nowIso.slice(0, 10), new Date(Date.now() + 300000).toISOString()).run();
   await checkpoint(db, jobId, "ai_task", task);
